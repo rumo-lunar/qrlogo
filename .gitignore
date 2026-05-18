@@ -1,0 +1,21 @@
+# Binaries
+/qrlogo
+/cmd/qrlogo/qrlogo
+*.exe
+*.test
+
+# Go workspace files
+go.work
+go.work.sum
+
+# Coverage / profiling
+*.out
+coverage.html
+cpu.pprof
+mem.pprof
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
