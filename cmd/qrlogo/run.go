@@ -37,6 +37,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	noHaloFlag := fs.Bool("no-halo", false, "skip 8-neighbour halo around dark logo cells")
 	logoScaleFlag := fs.Float64("logo-scale", 1.0, "fraction of the 61×61 grid the logo fills (0.0–1.0); logo is centred")
 	statsFlag := fs.Bool("stats", false, "print synthesis stats to stderr")
+	bestEffortFlag := fs.Bool("best-effort", false, "skip contradicting constraints instead of failing (recommended for dense logos)")
 
 	if err := fs.Parse(args); err != nil {
 		return &exitError{code: 1, msg: err.Error()}
@@ -66,8 +67,9 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	result, err := engine.Synthesize(engine.Options{
-		URL:    *urlFlag,
-		Target: target,
+		URL:        *urlFlag,
+		Target:     target,
+		BestEffort: *bestEffortFlag,
 	})
 	if err != nil {
 		return &exitError{code: 3, msg: fmt.Sprintf("qrlogo: synthesis failed: %v", err)}
@@ -79,6 +81,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fmt.Fprintf(stderr, "data constraints : %d\n", s.DataConstraints)
 		fmt.Fprintf(stderr, "function aligns  : %d\n", s.FunctionAlignments)
 		fmt.Fprintf(stderr, "function conflicts: %d\n", s.FunctionConflicts)
+		fmt.Fprintf(stderr, "skipped conflicts: %d\n", s.SkippedConflicts)
 	}
 
 	pngOpts := engine.PNGOptions{Scale: *scaleFlag, QuietZone: *quietFlag}

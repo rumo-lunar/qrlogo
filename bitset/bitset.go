@@ -43,9 +43,11 @@ type System struct {
 //     (bits[n/8] >> uint(7-n%8)) & 1
 //
 //     to match the bit ordering used by QR data placement.
+//
 //   - conflictRow: when ok is false, the index (in the input s.Rows)
 //     of a row that was reduced to the contradiction 0 = 1. When ok
 //     is true this value is meaningless.
+//
 //   - ok: true if the system is consistent. Underdetermined systems
 //     are consistent: free variables default to 0.
 //
@@ -147,4 +149,91 @@ func (s *System) Solve() (bits []byte, conflictRow int, ok bool) {
 		}
 	}
 	return bits, 0, true
+}
+
+// SolveBestEffort runs the same Gauss–Jordan elimination as Solve but
+// instead of returning false on a contradicting row it silently drops
+// that row and continues. Returns the solution bits and the number of
+// rows that were dropped.
+func (s *System) SolveBestEffort() (bits []byte, dropped int) {
+	words := (s.NumVars + 63) / 64
+	m := len(s.Rows)
+
+	type workRow struct {
+		vars    []uint64
+		target  byte
+		origIdx int
+	}
+	work := make([]workRow, m)
+	for i, r := range s.Rows {
+		v := make([]uint64, words)
+		copy(v, r.Vars)
+		work[i] = workRow{vars: v, target: r.Target & 1, origIdx: i}
+	}
+
+	pivotCol := make([]int, 0, s.NumVars)
+
+	r := 0
+	for c := 0; c < s.NumVars; c++ {
+		wordIdx := c / 64
+		bitMask := uint64(1) << uint(c%64)
+
+		pivot := -1
+		for i := r; i < m; i++ {
+			if work[i].vars[wordIdx]&bitMask != 0 {
+				pivot = i
+				break
+			}
+		}
+		if pivot == -1 {
+			continue
+		}
+
+		if pivot != r {
+			work[r], work[pivot] = work[pivot], work[r]
+		}
+
+		for j := 0; j < m; j++ {
+			if j == r {
+				continue
+			}
+			if work[j].vars[wordIdx]&bitMask == 0 {
+				continue
+			}
+			for k := 0; k < words; k++ {
+				work[j].vars[k] ^= work[r].vars[k]
+			}
+			work[j].target ^= work[r].target
+		}
+
+		pivotCol = append(pivotCol, c)
+		r++
+	}
+
+	// Consistency check: any row reduced to (Vars == 0, Target == 1) is
+	// a contradiction. Instead of failing, zero out the target and count.
+	for i := r; i < m; i++ {
+		if work[i].target == 0 {
+			continue
+		}
+		allZero := true
+		for k := 0; k < words; k++ {
+			if work[i].vars[k] != 0 {
+				allZero = false
+				break
+			}
+		}
+		if allZero {
+			work[i].target = 0
+			dropped++
+		}
+	}
+
+	bits = make([]byte, (s.NumVars+7)/8)
+	for k, col := range pivotCol {
+		if work[k].target != 0 {
+			bits[col/8] |= 1 << uint(7-col%8)
+		}
+	}
+	return bits, dropped
 }

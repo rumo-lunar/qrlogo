@@ -3,13 +3,13 @@
 // It ties together the four lower-level packages:
 //
 //   - /qr     produces a 61×61 symbolic ghost grid for V11-M mask 2,
-//             plus a 61×61 concrete grid of the spec-forced function-
-//             pattern bits.
+//     plus a 61×61 concrete grid of the spec-forced function-
+//     pattern bits.
 //   - /render produces a 61×61 visual target map whose cells say
-//             "this module must be Black", "must be White", or
-//             "don't care".
+//     "this module must be Black", "must be White", or
+//     "don't care".
 //   - /bitset solves the resulting GF(2) linear system for the free
-//             padding variables.
+//     padding variables.
 //
 // Synthesize walks the symbolic grid against the target map, builds
 // one bitset.Row per data-cell constraint, asks /bitset to solve,
@@ -37,6 +37,12 @@ type Options struct {
 	// default free-variable value (zero) and the result is a plain
 	// V11-M QR symbol carrying URL.
 	Target *render.TargetMap
+
+	// BestEffort, when true, uses SolveBestEffort instead of Solve.
+	// Contradicting constraint rows are silently dropped; the result
+	// approximates the target as closely as the free variables allow.
+	// Use this when the logo is dense or spans the full grid.
+	BestEffort bool
 }
 
 // Stats reports counters from a synthesis run.
@@ -62,6 +68,11 @@ type Stats struct {
 	// happens to match — these constraints are trivially satisfied
 	// by the spec and contribute no rows to the system.
 	FunctionAlignments int
+
+	// SkippedConflicts is the number of data-constraint rows that were
+	// dropped by SolveBestEffort because they contradicted the system.
+	// Always 0 when BestEffort is false.
+	SkippedConflicts int
 }
 
 // Result is the output of one synthesis call.
@@ -146,15 +157,19 @@ func Synthesize(opts Options) (*Result, error) {
 	// 3. Solve.
 	var solution []byte
 	if d.NumVars > 0 {
-		var (
-			ok       bool
-			conflict int
-		)
-		solution, conflict, ok = sys.Solve()
-		if !ok {
-			return nil, fmt.Errorf(
-				"engine: constraint row %d is inconsistent with the existing rows",
-				conflict)
+		if opts.BestEffort {
+			var dropped int
+			solution, dropped = sys.SolveBestEffort()
+			stats.SkippedConflicts = dropped
+		} else {
+			var conflict int
+			var ok bool
+			solution, conflict, ok = sys.Solve()
+			if !ok {
+				return nil, fmt.Errorf(
+					"engine: constraint row %d is inconsistent with the existing rows",
+					conflict)
+			}
 		}
 	}
 

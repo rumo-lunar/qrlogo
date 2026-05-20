@@ -182,6 +182,29 @@ func TestSolve_IdentityStress128(t *testing.T) {
 	}
 }
 
+func TestSolveBestEffort_DropsContradiction(t *testing.T) {
+	// Arrange: x₀ = 1 and x₀ = 0 — after elimination the second row
+	// reduces to 0 = 1, a contradiction that must be dropped.
+	sut := &bitset.System{
+		NumVars: 1,
+		Rows: []bitset.Row{
+			{Vars: setVars(1, 0), Target: 1},
+			{Vars: setVars(1, 0), Target: 0},
+		},
+	}
+
+	// Act
+	bits, dropped := sut.SolveBestEffort()
+
+	// Assert
+	if dropped != 1 {
+		t.Errorf("expected dropped=1, got %d", dropped)
+	}
+	if bits == nil {
+		t.Fatal("expected non-nil bits")
+	}
+}
+
 // TestSolve_DoesNotMutate proves the contract that Solve operates on
 // an internal copy of the system. Without this guarantee, /engine
 // cannot retry solves with dropped constraints from the same System.

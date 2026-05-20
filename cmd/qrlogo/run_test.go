@@ -155,6 +155,26 @@ func TestRun_LogoScale(t *testing.T) {
 	}
 }
 
+func TestRun_BestEffort(t *testing.T) {
+	blackPNG := writeBlackPNG(t, 16, 16)
+
+	var stdout bytes.Buffer
+	err := run([]string{
+		"-url", "https://example.com",
+		"-image", blackPNG,
+		"-logo-scale", "1.0",
+		"-best-effort",
+		"-out", "-",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("expected synthesis to succeed with -best-effort, got: %v", err)
+	}
+
+	if _, err := png.Decode(&stdout); err != nil {
+		t.Fatalf("output is not a valid PNG: %v", err)
+	}
+}
+
 func TestRun_LogoScale_InvalidRange(t *testing.T) {
 	var stderr bytes.Buffer
 	err := run([]string{"-url", "https://example.com", "-logo-scale", "0"}, &bytes.Buffer{}, &stderr)
