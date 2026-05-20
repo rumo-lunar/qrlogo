@@ -17,6 +17,8 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 
 	"github.com/rumo-lunar/qrlogo/bitset"
@@ -159,7 +161,7 @@ func Synthesize(opts Options) (*Result, error) {
 	stats := Stats{Version: version, FreeVars: d.NumVars}
 
 	// 2. Build the constraint system from the target map.
-	sys := &bitset.System{NumVars: d.NumVars}
+	sys := &bitset.System{NumVars: d.NumVars, Seed: noiseSeed(opts.URL, (d.NumVars+7)/8)}
 	if opts.Target != nil {
 		if opts.Target.W != m.Size || opts.Target.H != m.Size {
 			return nil, fmt.Errorf("engine: target size %dx%d, want %dx%d",
@@ -231,4 +233,22 @@ func Synthesize(opts Options) (*Result, error) {
 		Solution: solution,
 		Stats:    stats,
 	}, nil
+}
+
+// noiseSeed expands url into n bytes of deterministic pseudorandom noise
+// using iterated SHA-256 keyed by the URL. The output is stable: the same
+// URL always produces the same noise, so the generated QR image is
+// reproducible.
+func noiseSeed(url string, n int) []byte {
+	noise := make([]byte, n)
+	var counter [4]byte
+	offset := 0
+	for offset < n {
+		binary.BigEndian.PutUint32(counter[:], uint32(offset/sha256.Size))
+		h := sha256.New()
+		h.Write([]byte(url))
+		h.Write(counter[:])
+		offset += copy(noise[offset:], h.Sum(nil))
+	}
+	return noise
 }
