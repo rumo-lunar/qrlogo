@@ -146,7 +146,7 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		if err != nil {
 			return nil, fmt.Errorf("cannot decode image %q: %w", imagePath, err)
 		}
-		src = cropToContent(src, threshold)
+		src = cropTransparent(src)
 		inner = render.FromImage(src, sub, sub, render.ImageOptions{
 			Threshold:         threshold,
 			IgnoreTransparent: true,
@@ -181,24 +181,18 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 	return full, nil
 }
 
-// cropToContent returns a sub-image of src trimmed to the bounding box of its
-// "content" pixels — defined as any opaque (alpha > 0) pixel whose luminance
-// is below threshold. This works for both transparent-background and
-// white-background logos. If no content pixels are found, src is returned
-// unchanged.
-func cropToContent(src image.Image, threshold uint32) image.Image {
+// cropTransparent returns a sub-image of src trimmed to the bounding box of
+// its opaque pixels. Images without an alpha channel are returned unchanged.
+// If all pixels are transparent, src is returned unchanged.
+func cropTransparent(src image.Image) image.Image {
 	b := src.Bounds()
 	minX, minY := b.Max.X, b.Max.Y
 	maxX, maxY := b.Min.X, b.Min.Y
 
 	for y := b.Min.Y; y < b.Max.Y; y++ {
 		for x := b.Min.X; x < b.Max.X; x++ {
-			r, g, bl, a := src.At(x, y).RGBA()
+			_, _, _, a := src.At(x, y).RGBA()
 			if a == 0 {
-				continue
-			}
-			lum := (299*r + 587*g + 114*bl) / 1000
-			if lum >= threshold {
 				continue
 			}
 			if x < minX {
@@ -217,7 +211,7 @@ func cropToContent(src image.Image, threshold uint32) image.Image {
 	}
 
 	if minX > maxX || minY > maxY {
-		return src
+		return src // all transparent — nothing to crop
 	}
 
 	type subImager interface {
