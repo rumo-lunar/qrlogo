@@ -185,7 +185,7 @@ qrlogo/
 
 🚧 **Pre‑implementation.** This README is the design contract; code follows in four phases.
 
-- [ ] **Phase 1 — `/bitset`** — GF(2) Gauss–Jordan solver with `[]uint64` rows. Unit tests on small known systems, contradictory systems, and underdetermined systems.
+- [x] **Phase 1 — `/bitset`** — *In progress.* GF(2) Gauss–Jordan solver with `[]uint64` rows. Unit tests on small known systems, contradictory systems, and underdetermined systems. API locked: `Row{Vars []uint64; Target byte}`, `System{NumVars int; Rows []Row}`, `Solve() (bits []byte, conflictRow int, ok bool)` — solver does not mutate the system, free variables default to 0, output is MSB‑first per byte.
 - [ ] **Phase 2 — `/qr`** — Symbolic QR encoder. Function‑pattern map, codeword zig‑zag traversal, RS over GF(256) with parallel variable tracking via the 8 × 8 GF(2) bridge, mask 2.
 - [ ] **Phase 3 — `/render`** — Image / text → 61 × 61 grid, 4‑neighbour halo, priority tags.
 - [ ] **Phase 4 — `/engine`** — Integration, priority fallback, final PNG.
