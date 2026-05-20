@@ -190,6 +190,7 @@ func TestRun_ImageTarget_Stats(t *testing.T) {
 	err := run([]string{
 		"-url", "https://example.com",
 		"-image", blackPNG,
+		"-best-effort",
 		"-out", "-",
 		"-stats",
 	}, &bytes.Buffer{}, &stderr)

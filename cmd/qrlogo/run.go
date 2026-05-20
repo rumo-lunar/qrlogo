@@ -146,6 +146,7 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		if err != nil {
 			return nil, fmt.Errorf("cannot decode image %q: %w", imagePath, err)
 		}
+		src = cropTransparent(src)
 		inner = render.FromImage(src, sub, sub, render.ImageOptions{
 			Threshold:         threshold,
 			IgnoreTransparent: true,
@@ -178,4 +179,46 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		}
 	}
 	return full, nil
+}
+
+// cropTransparent returns a sub-image of src trimmed to the bounding box of
+// its opaque pixels. Images without an alpha channel are returned unchanged.
+// If all pixels are transparent, src is returned unchanged.
+func cropTransparent(src image.Image) image.Image {
+	b := src.Bounds()
+	minX, minY := b.Max.X, b.Max.Y
+	maxX, maxY := b.Min.X, b.Min.Y
+
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			_, _, _, a := src.At(x, y).RGBA()
+			if a == 0 {
+				continue
+			}
+			if x < minX {
+				minX = x
+			}
+			if x > maxX {
+				maxX = x
+			}
+			if y < minY {
+				minY = y
+			}
+			if y > maxY {
+				maxY = y
+			}
+		}
+	}
+
+	if minX > maxX || minY > maxY {
+		return src // all transparent — nothing to crop
+	}
+
+	type subImager interface {
+		SubImage(image.Rectangle) image.Image
+	}
+	if si, ok := src.(subImager); ok {
+		return si.SubImage(image.Rect(minX, minY, maxX+1, maxY+1))
+	}
+	return src
 }
