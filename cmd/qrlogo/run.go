@@ -27,7 +27,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("qrlogo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	urlFlag := fs.String("url", "", "byte-mode payload (required, ≤100 bytes)")
+	urlFlag := fs.String("url", "", "byte-mode payload (required, ≤100 bytes for v11, ≤2331 bytes for v40)")
+	versionFlag := fs.Int("version", 11, "QR version (11 or 40)")
 	imageFlag := fs.String("image", "", "path to PNG/JPEG/GIF logo image")
 	textFlag := fs.String("text", "", "text to embed as logo")
 	outFlag := fs.String("out", "qrlogo.png", `output PNG path ("-" for stdout)`)
@@ -35,7 +36,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	quietFlag := fs.Int("quiet", 4, "quiet-zone modules")
 	threshFlag := fs.Uint("threshold", 0x8000, "luminance cutoff for image thresholding [0,65535]")
 	noHaloFlag := fs.Bool("no-halo", false, "skip 8-neighbour halo around dark logo cells")
-	logoScaleFlag := fs.Float64("logo-scale", 1.0, "fraction of the 61×61 grid the logo fills (0.0–1.0); logo is centred")
+	logoScaleFlag := fs.Float64("logo-scale", 1.0, "fraction of the QR grid the logo fills (0.0–1.0); logo is centred")
 	statsFlag := fs.Bool("stats", false, "print synthesis stats to stderr")
 	bestEffortFlag := fs.Bool("best-effort", false, "skip contradicting constraints instead of failing (recommended for dense logos)")
 
@@ -48,11 +49,23 @@ func run(args []string, stdout, stderr io.Writer) error {
 		fs.Usage()
 		return &exitError{code: 1, msg: "-url is required"}
 	}
-	if len(*urlFlag) > qr.MaxURLBytesV11M {
-		return &exitError{
-			code: 2,
-			msg:  fmt.Sprintf("qrlogo: URL is %d bytes, maximum is %d", len(*urlFlag), qr.MaxURLBytesV11M),
+	switch *versionFlag {
+	case 11:
+		if len(*urlFlag) > qr.MaxURLBytesV11M {
+			return &exitError{
+				code: 2,
+				msg:  fmt.Sprintf("qrlogo: URL is %d bytes, maximum is %d for v11", len(*urlFlag), qr.MaxURLBytesV11M),
+			}
 		}
+	case 40:
+		if len(*urlFlag) > qr.MaxURLBytesV40M {
+			return &exitError{
+				code: 2,
+				msg:  fmt.Sprintf("qrlogo: URL is %d bytes, maximum is %d for v40", len(*urlFlag), qr.MaxURLBytesV40M),
+			}
+		}
+	default:
+		return &exitError{code: 1, msg: fmt.Sprintf("qrlogo: unsupported -version %d (use 11 or 40)", *versionFlag)}
 	}
 	if *imageFlag != "" && *textFlag != "" {
 		return &exitError{code: 1, msg: "qrlogo: -image and -text are mutually exclusive"}
@@ -61,12 +74,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return &exitError{code: 1, msg: "qrlogo: -logo-scale must be in (0, 1]"}
 	}
 
-	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag)
+	gridSize := 61
+	if *versionFlag == 40 {
+		gridSize = 177
+	}
+
+	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag, gridSize)
 	if err != nil {
 		return &exitError{code: 2, msg: fmt.Sprintf("qrlogo: %v", err)}
 	}
 
 	result, err := engine.Synthesize(engine.Options{
+		Version:    *versionFlag,
 		URL:        *urlFlag,
 		Target:     target,
 		BestEffort: *bestEffortFlag,
@@ -104,10 +123,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScale float64) (*render.TargetMap, error) {
-	const gridSize = 61
-
-	// sub is the side length of the logo region within the 61×61 grid.
+func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScale float64, gridSize int) (*render.TargetMap, error) {
+	// sub is the side length of the logo region within the grid.
 	sub := int(float64(gridSize) * logoScale)
 	if sub < 1 {
 		sub = 1
@@ -151,7 +168,7 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		return inner, nil
 	}
 
-	// Stamp the sub-grid into a full 61×61 target (remainder stays DontCare).
+	// Stamp the sub-grid into a full gridSize×gridSize target (remainder stays DontCare).
 	full := render.New(gridSize, gridSize)
 	for r := 0; r < sub; r++ {
 		for c := 0; c < sub; c++ {

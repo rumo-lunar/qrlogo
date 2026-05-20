@@ -43,7 +43,26 @@ func PlaceCodewords(d *sym.Domain, m *Map, codewords []sym.Byte) [][]sym.Bit {
 		panic(fmt.Sprintf("qr.PlaceCodewords: got %d codewords, want %d",
 			len(codewords), want))
 	}
+	return placeCodewordsGeneric(d, m, codewords, want)
+}
 
+// PlaceCodewordsV40M lays out the 3706 V40 interleaved codewords
+// (29648 bits) into the data region of a 177×177 grid using the same
+// QR zig-zag traversal as PlaceCodewords.
+//
+// Panics if the codeword count is wrong.
+func PlaceCodewordsV40M(d *sym.Domain, m *Map, codewords []sym.Byte) [][]sym.Bit {
+	want := DataCodewordsV40M + ECCodewordsV40M
+	if len(codewords) != want {
+		panic(fmt.Sprintf("qr.PlaceCodewordsV40M: got %d codewords, want %d",
+			len(codewords), want))
+	}
+	return placeCodewordsGeneric(d, m, codewords, want)
+}
+
+// placeCodewordsGeneric is the version-independent codeword placement
+// loop. want is the expected total number of codewords (data + EC).
+func placeCodewordsGeneric(d *sym.Domain, m *Map, codewords []sym.Byte, want int) [][]sym.Bit {
 	n := m.Size
 	grid := make([][]sym.Bit, n)
 	zero := d.ConstBit(0)
@@ -76,7 +95,7 @@ func PlaceCodewords(d *sym.Domain, m *Map, codewords []sym.Byte) [][]sym.Bit {
 	}
 
 	if expected := want * 8; bitIdx != expected {
-		panic(fmt.Sprintf("qr.PlaceCodewords: placed %d bits, want %d",
+		panic(fmt.Sprintf("qr.placeCodewordsGeneric: placed %d bits, want %d",
 			bitIdx, expected))
 	}
 	return grid
