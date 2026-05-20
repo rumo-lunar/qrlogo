@@ -182,6 +182,91 @@ func TestSynthesize_InconsistentSystemErrors(t *testing.T) {
 	_ = err // either outcome is acceptable for this smoke test
 }
 
+func TestSynthesizeV40_ProducesV40Grid(t *testing.T) {
+	// Arrange + Act
+	res, err := engine.Synthesize(engine.Options{
+		Version: 40,
+		URL:     "https://lunar.app",
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Synthesize V40: %v", err)
+	}
+	if len(res.Symbol) != 177 {
+		t.Fatalf("rows = %d, want 177", len(res.Symbol))
+	}
+	for r, row := range res.Symbol {
+		if len(row) != 177 {
+			t.Errorf("row %d width = %d, want 177", r, len(row))
+		}
+		for c, v := range row {
+			if v != 0 && v != 1 {
+				t.Errorf("cell (%d,%d) = %d, want 0 or 1", r, c, v)
+			}
+		}
+	}
+}
+
+func TestSynthesizeV40_StatsReportVersion40(t *testing.T) {
+	// Arrange + Act
+	res, err := engine.Synthesize(engine.Options{
+		Version: 40,
+		URL:     "https://lunar.app",
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Synthesize V40: %v", err)
+	}
+	if res.Stats.Version != 40 {
+		t.Errorf("Stats.Version = %d, want 40", res.Stats.Version)
+	}
+}
+
+func TestSynthesizeV40_FunctionPatternsMatchSpec(t *testing.T) {
+	// Arrange + Act
+	res, err := engine.Synthesize(engine.Options{
+		Version: 40,
+		URL:     "https://lunar.app",
+	})
+	if err != nil {
+		t.Fatalf("Synthesize V40: %v", err)
+	}
+
+	// Assert: every non-data cell must match FunctionBitsV40M.
+	m := qr.NewV40Map()
+	fn := qr.FunctionBitsV40M()
+	for r := 0; r < m.Size; r++ {
+		for c := 0; c < m.Size; c++ {
+			if m.KindAt(r, c) == qr.KindData {
+				continue
+			}
+			if res.Symbol[r][c] != fn[r][c] {
+				t.Errorf("function cell (%d,%d) = %d, spec = %d",
+					r, c, res.Symbol[r][c], fn[r][c])
+			}
+		}
+	}
+}
+
+func TestSynthesizeV11_StatsReportVersion11(t *testing.T) {
+	res, err := engine.Synthesize(engine.Options{URL: "https://lunar.app"})
+	if err != nil {
+		t.Fatalf("Synthesize V11: %v", err)
+	}
+	if res.Stats.Version != 11 {
+		t.Errorf("Stats.Version = %d, want 11 (default)", res.Stats.Version)
+	}
+}
+
+func TestSynthesize_RejectsUnsupportedVersion(t *testing.T) {
+	_, err := engine.Synthesize(engine.Options{Version: 99, URL: "https://lunar.app"})
+	if err == nil {
+		t.Error("unsupported version did not error")
+	}
+}
+
 func TestSynthesize_RejectsEmptyURL(t *testing.T) {
 	_, err := engine.Synthesize(engine.Options{URL: ""})
 	if err == nil {
