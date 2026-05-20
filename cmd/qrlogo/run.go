@@ -35,6 +35,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	quietFlag := fs.Int("quiet", 4, "quiet-zone modules")
 	threshFlag := fs.Uint("threshold", 0x8000, "luminance cutoff for image thresholding [0,65535]")
 	noHaloFlag := fs.Bool("no-halo", false, "skip 8-neighbour halo around dark logo cells")
+	logoScaleFlag := fs.Float64("logo-scale", 1.0, "fraction of the 61×61 grid the logo fills (0.0–1.0); logo is centred")
 	statsFlag := fs.Bool("stats", false, "print synthesis stats to stderr")
 
 	if err := fs.Parse(args); err != nil {
@@ -55,8 +56,11 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *imageFlag != "" && *textFlag != "" {
 		return &exitError{code: 1, msg: "qrlogo: -image and -text are mutually exclusive"}
 	}
+	if *logoScaleFlag <= 0 || *logoScaleFlag > 1 {
+		return &exitError{code: 1, msg: "qrlogo: -logo-scale must be in (0, 1]"}
+	}
 
-	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag)
+	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag)
 	if err != nil {
 		return &exitError{code: 2, msg: fmt.Sprintf("qrlogo: %v", err)}
 	}
@@ -97,8 +101,18 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func buildTarget(imagePath, text string, threshold uint32, noHalo bool) (*render.TargetMap, error) {
-	var target *render.TargetMap
+func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScale float64) (*render.TargetMap, error) {
+	const gridSize = 61
+
+	// sub is the side length of the logo region within the 61×61 grid.
+	sub := int(float64(gridSize) * logoScale)
+	if sub < 1 {
+		sub = 1
+	}
+	// offset centres the sub-grid.
+	offset := (gridSize - sub) / 2
+
+	var inner *render.TargetMap
 
 	switch {
 	case imagePath != "":
@@ -112,17 +126,36 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool) (*render
 		if err != nil {
 			return nil, fmt.Errorf("cannot decode image %q: %w", imagePath, err)
 		}
-		target = render.FromImage(src, 61, 61, render.ImageOptions{
+		inner = render.FromImage(src, sub, sub, render.ImageOptions{
 			Threshold:         threshold,
 			IgnoreTransparent: true,
 		})
 
 	case text != "":
-		target = render.RenderText(text, 61, 61, render.TextOptions{})
+		inner = render.RenderText(text, sub, sub, render.TextOptions{})
 	}
 
-	if target != nil && !noHalo {
-		render.ApplyHalo(target)
+	if inner == nil {
+		return nil, nil
 	}
-	return target, nil
+
+	if !noHalo {
+		render.ApplyHalo(inner)
+	}
+
+	// If the logo fills the full grid, return it directly.
+	if sub == gridSize {
+		return inner, nil
+	}
+
+	// Stamp the sub-grid into a full 61×61 target (remainder stays DontCare).
+	full := render.New(gridSize, gridSize)
+	for r := 0; r < sub; r++ {
+		for c := 0; c < sub; c++ {
+			if p := inner.At(r, c); p != render.PixelDontCare {
+				full.Set(offset+r, offset+c, p)
+			}
+		}
+	}
+	return full, nil
 }

@@ -121,6 +121,46 @@ outer:
 	}
 }
 
+// --- end-to-end: logo-scale centres the logo in a sub-region ---
+
+func TestRun_LogoScale(t *testing.T) {
+	// An all-black PNG at scale 1.0 makes synthesis fail (over-constrained).
+	// At scale 0.3 it fits in ~18×18 modules — well within solver capacity.
+	blackPNG := writeBlackPNG(t, 16, 16)
+
+	var stdout bytes.Buffer
+	err := run([]string{
+		"-url", "https://example.com",
+		"-image", blackPNG,
+		"-logo-scale", "0.3",
+		"-out", "-",
+	}, &stdout, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("unexpected error at logo-scale 0.3: %v", err)
+	}
+
+	img, err := png.Decode(&stdout)
+	if err != nil {
+		t.Fatalf("output is not a valid PNG: %v", err)
+	}
+
+	// Centre of the symbol should contain dark pixels from the black logo.
+	scale, quiet := 8, 4
+	centre := quiet + 30 // module 30 ≈ centre of 61-module grid
+	x := centre*scale + scale/2
+	y := centre*scale + scale/2
+	r, _, _, _ := img.At(x, y).RGBA()
+	if r >= 0x8000 {
+		t.Error("expected a dark pixel at symbol centre for all-black logo")
+	}
+}
+
+func TestRun_LogoScale_InvalidRange(t *testing.T) {
+	var stderr bytes.Buffer
+	err := run([]string{"-url", "https://example.com", "-logo-scale", "0"}, &bytes.Buffer{}, &stderr)
+	assertExitCode(t, err, 1)
+}
+
 // --- end-to-end: image target + stats ---
 
 func TestRun_ImageTarget_Stats(t *testing.T) {
