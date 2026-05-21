@@ -150,6 +150,33 @@ func (r *Result) EncodePNG(w io.Writer, opts PNGOptions) error {
 	fg := toRGBA(o.Foreground)
 	bg := toRGBA(o.Background)
 
+	// Compute the logo footprint up front so the renderer can skip
+	// every module whose centre falls inside it. The footprint is
+	// the square padding card (boxSize + 2·pad on a side), centred
+	// at the QR centre. With LogoPadding == 0 it shrinks to just the
+	// logo's bounding square.
+	var (
+		reserved image.Rectangle
+		boxSize  int
+		logoCX   int
+		logoCY   int
+	)
+	if o.Logo != nil {
+		symPx := n * o.Scale
+		boxSize = int(float64(symPx) * o.LogoCoverage)
+		if boxSize < 1 {
+			boxSize = 1
+		}
+		logoCX = o.QuietZone*o.Scale + symPx/2
+		logoCY = logoCX
+		pad := int(float64(boxSize) * o.LogoPadding)
+		cardHalf := boxSize/2 + pad
+		reserved = image.Rect(
+			logoCX-cardHalf, logoCY-cardHalf,
+			logoCX+cardHalf, logoCY+cardHalf,
+		)
+	}
+
 	img := renderSymbol(
 		r.Symbol,
 		r.Spec.Version,
@@ -158,17 +185,11 @@ func (r *Result) EncodePNG(w io.Writer, opts PNGOptions) error {
 		fg, bg,
 		!o.SquareFinders,
 		o.ModuleShape == ModuleShapeDot,
+		reserved,
 	)
 
 	if o.Logo != nil {
-		symPx := n * o.Scale
-		boxSize := int(float64(symPx) * o.LogoCoverage)
-		if boxSize < 1 {
-			boxSize = 1
-		}
-		cx := o.QuietZone*o.Scale + symPx/2
-		cy := o.QuietZone*o.Scale + symPx/2
-		drawLogo(img, o.Logo, cx, cy, boxSize, o.LogoPadding, bg)
+		drawLogo(img, o.Logo, logoCX, logoCY, boxSize, o.LogoPadding, bg)
 	}
 
 	return png.Encode(w, img)

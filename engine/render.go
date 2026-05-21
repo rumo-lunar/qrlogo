@@ -19,17 +19,23 @@ import (
 //     squares. Always recommended; scanners locate finders by their
 //     1:1:3:1:1 ratio which the rounded form preserves.
 //
-//   - dotModules == true       renders data and timing modules as
-//     filled circles. Alignment patterns (5×5 markers) and finder
-//     patterns are NOT dotted — their detectability depends on
-//     contiguous solid regions, and dotting them measurably hurts
-//     scannability.
+//   - dotModules == true       renders every non-finder module as a
+//     filled circle (data, timing, alignment, dark, version,
+//     format). Real-world dot QR codes rely on EC level H to
+//     compensate for the slightly reduced ink coverage of circles
+//     versus squares.
+//
+//   - reserved                 a pixel-coordinate rectangle that
+//     modules are skipped inside of. Used to clear the area behind
+//     a centred logo so circles aren't drawn half-overlapped by the
+//     overlay. Pass image.Rectangle{} (zero value) for no clearing.
 func renderSymbol(
 	grid [][]byte,
 	v spec.Version,
 	scale, quiet int,
 	fg, bg color.RGBA,
 	roundedFinders, dotModules bool,
+	reserved image.Rectangle,
 ) *image.RGBA {
 	n := len(grid)
 	size := (n + 2*quiet) * scale
@@ -42,12 +48,11 @@ func renderSymbol(
 		}
 	}
 
-	// Mark cells we want to handle specially in the main module loop.
+	// Mark cells that belong to a finder pattern so the main loop
+	// skips them — they are drawn separately as rounded shapes.
 	inFinder := make([][]bool, n)
-	inAlignment := make([][]bool, n)
 	for r := 0; r < n; r++ {
 		inFinder[r] = make([]bool, n)
-		inAlignment[r] = make([]bool, n)
 	}
 	finderOrigins := v.FinderOrigins()
 	if roundedFinders {
@@ -59,21 +64,12 @@ func renderSymbol(
 			}
 		}
 	}
-	if dotModules {
-		// Alignment patterns stay solid in dot mode so scanners can
-		// still latch onto them. Mark every cell of every 5×5
-		// alignment pattern; the main loop renders them as squares.
-		v.ForEachAlignment(func(ar, ac int) {
-			for dr := -2; dr <= 2; dr++ {
-				for dc := -2; dc <= 2; dc++ {
-					inAlignment[ar+dr][ac+dc] = true
-				}
-			}
-		})
-	}
 
-	// Per-module rendering.
+	// Per-module rendering. In dot mode every non-finder module is a
+	// circle, including alignment patterns — at EC H this is the
+	// trade we accept for visual consistency.
 	rDot := float64(scale) / 2
+	hasReserved := !reserved.Empty()
 	for r := 0; r < n; r++ {
 		for c := 0; c < n; c++ {
 			if grid[r][c] == 0 || inFinder[r][c] {
@@ -81,7 +77,17 @@ func renderSymbol(
 			}
 			x0 := (c + quiet) * scale
 			y0 := (r + quiet) * scale
-			if dotModules && !inAlignment[r][c] {
+			// Skip any module whose centre falls inside the
+			// reserved rect (the logo footprint). The EC budget
+			// absorbs the cleared cells.
+			if hasReserved {
+				cxp := x0 + scale/2
+				cyp := y0 + scale/2
+				if (image.Point{X: cxp, Y: cyp}).In(reserved) {
+					continue
+				}
+			}
+			if dotModules {
 				cxp := float64(x0) + rDot
 				cyp := float64(y0) + rDot
 				fillCircle(img, cxp, cyp, rDot, fg)
