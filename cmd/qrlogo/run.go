@@ -49,10 +49,28 @@ func run(args []string, stdout, stderr io.Writer) error {
 		scale          = fs.Int("scale", 8, "Pixels per QR module")
 		quiet          = fs.Int("quiet", 4, "Quiet zone in modules")
 		out            = fs.String("out", "qrlogo.png", "Output PNG path (- for stdout)")
+		applyDefault   = fs.Bool("default", false, "Apply the Lunar brand preset (-modules dot, -logo-coverage 0.25, -logo-padding 0.10, embedded Lunar logo). Explicit flags override the preset.")
 	)
 
 	if err := fs.Parse(args); err != nil {
 		return &exitError{code: exitInvalidArgs, err: err}
+	}
+
+	// Track which flags the user set explicitly so the preset can
+	// only fill in the gaps without clobbering deliberate choices.
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	if *applyDefault {
+		if !explicit["modules"] {
+			*modules = "dot"
+		}
+		if !explicit["logo-coverage"] {
+			*logoCoverage = 0.25
+		}
+		if !explicit["logo-padding"] {
+			*logoPadding = 0.10
+		}
 	}
 
 	if *url == "" {
@@ -86,7 +104,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	}
 
 	var logo image.Image
-	if *imagePath != "" {
+	switch {
+	case *imagePath != "":
 		f, err := os.Open(*imagePath)
 		if err != nil {
 			return &exitError{
@@ -101,6 +120,12 @@ func run(args []string, stdout, stderr io.Writer) error {
 				code: exitInvalidInput,
 				err:  fmt.Errorf("decoding -image: %w", err),
 			}
+		}
+	case *applyDefault:
+		var err error
+		logo, err = decodeLunarQRLogo()
+		if err != nil {
+			return &exitError{code: exitInvalidInput, err: err}
 		}
 	}
 	if logo != nil {

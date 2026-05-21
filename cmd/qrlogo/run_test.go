@@ -136,6 +136,52 @@ func TestRun_OverdenseLogoCoverageWarns(t *testing.T) {
 	}
 }
 
+func TestRun_DefaultFlagAppliesLunarPreset(t *testing.T) {
+	// Arrange
+	out := filepath.Join(t.TempDir(), "qr.png")
+	var stdout, stderr bytes.Buffer
+
+	// Act: -default alone should produce a valid PNG with the
+	// embedded logo overlay (no -image required).
+	err := run([]string{"-url", "https://lunar.app", "-default", "-out", out}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run -default: %v", err)
+	}
+
+	// Assert: output decodes as PNG.
+	f, _ := os.Open(out)
+	defer f.Close()
+	if _, err := png.Decode(f); err != nil {
+		t.Fatalf("png.Decode: %v", err)
+	}
+}
+
+func TestRun_DefaultFlagExplicitOverridesWin(t *testing.T) {
+	// Arrange: -default sets modules=dot, but the user passes
+	// -modules square — the explicit choice must win.
+	out := filepath.Join(t.TempDir(), "qr.png")
+	var stdout, stderr bytes.Buffer
+
+	// Act
+	err := run([]string{
+		"-url", "https://lunar.app",
+		"-default",
+		"-modules", "square",
+		"-out", out,
+	}, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run -default -modules square: %v", err)
+	}
+
+	// Assert: PNG is valid; the visual asserts are out of scope, but
+	// the run completes which proves the override path doesn't crash.
+	f, _ := os.Open(out)
+	defer f.Close()
+	if _, err := png.Decode(f); err != nil {
+		t.Fatalf("png.Decode: %v", err)
+	}
+}
+
 func TestRun_RoundedFindersDefaultsOn(t *testing.T) {
 	// Sanity: -rounded-finders=false should not error; both runs
 	// should produce a valid PNG with identical dimensions.
