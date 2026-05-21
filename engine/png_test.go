@@ -91,6 +91,31 @@ func TestEncodePNG_RejectsBadLogoCoverage(t *testing.T) {
 	}
 }
 
+func TestEncodePNG_WithNonSquareLogoStillSucceeds(t *testing.T) {
+	// Arrange: a deliberately wide 200×60 logo. Should be scaled so
+	// the longer side equals LogoCoverage * symbol width and the
+	// shorter side scales proportionally — no panic, no distortion,
+	// no validation error.
+	res, err := engine.Encode(engine.Options{URL: "https://lunar.app", EC: spec.ECHigh})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var buf bytes.Buffer
+
+	// Act
+	err = res.EncodePNG(&buf, engine.PNGOptions{
+		Logo:         image.NewRGBA(image.Rect(0, 0, 200, 60)),
+		LogoCoverage: 0.22,
+		LogoPadding:  0.10,
+	})
+	if err != nil {
+		t.Fatalf("EncodePNG: %v", err)
+	}
+	if _, err := png.Decode(&buf); err != nil {
+		t.Fatalf("png.Decode: %v", err)
+	}
+}
+
 func TestEncodePNG_WithLogoPaintsAndStaysSquare(t *testing.T) {
 	// Arrange
 	res, err := engine.Encode(engine.Options{URL: "https://lunar.app", EC: spec.ECHigh})

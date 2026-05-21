@@ -37,10 +37,11 @@ type PNGOptions struct {
 	// correction budget has to absorb the obscured modules.
 	Logo image.Image
 
-	// LogoCoverage is the side length of the logo box as a fraction
-	// of the QR symbol (excluding quiet zone), in (0, 1). Anything
-	// past about 0.25 risks unscannable output even at EC H.
-	// Zero means 0.18 when Logo is set, 0 otherwise.
+	// LogoCoverage bounds the LONGER side of the logo as a fraction
+	// of the QR symbol (excluding quiet zone), in (0, 1]. The shorter
+	// side scales proportionally so the source aspect ratio is
+	// preserved. Anything past about 0.25 risks unscannable output
+	// even at EC H. Zero means 0.18 when Logo is set, 0 otherwise.
 	LogoCoverage float64
 
 	// LogoPadding is the padding rendered as a solid Background

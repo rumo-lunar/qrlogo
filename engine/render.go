@@ -194,10 +194,11 @@ func blend(src, dst uint8, a float64) uint8 {
 	return uint8(v + 0.5)
 }
 
-// drawLogo composites src into img, scaled so its longer side equals
-// boxSize, centred at (cx, cy). A bgPadding fraction is rendered as
-// a solid bg rectangle behind src to keep the logo legible against
-// the surrounding QR modules.
+// drawLogo composites src into img centred at (cx, cy), preserving
+// the source aspect ratio. boxSize bounds the LONGER side; the
+// shorter side is scaled proportionally. A bg-coloured rounded
+// rectangle is painted behind the logo as a padding card so the
+// artwork is legible against the surrounding QR modules.
 //
 // No QR modules are cleared — src is painted on top. The EC budget
 // has to absorb the modules that disappear under the logo. Callers
@@ -206,22 +207,46 @@ func drawLogo(img *image.RGBA, src image.Image, cx, cy, boxSize int, padding flo
 	if boxSize <= 0 {
 		return
 	}
-	half := boxSize / 2
-	// Padding box: includes padding on every side.
+	sw := src.Bounds().Dx()
+	sh := src.Bounds().Dy()
+	if sw <= 0 || sh <= 0 {
+		return
+	}
+
+	// Scale the source so its longer side equals boxSize, preserving
+	// aspect ratio. Integer division on the shorter side rounds down,
+	// which keeps the rendered logo strictly inside the bounding box.
+	var lw, lh int
+	if sw >= sh {
+		lw = boxSize
+		lh = boxSize * sh / sw
+	} else {
+		lh = boxSize
+		lw = boxSize * sw / sh
+	}
+	if lw < 1 {
+		lw = 1
+	}
+	if lh < 1 {
+		lh = 1
+	}
+
+	// Padding card hugs the actual logo rect on every side, so a wide
+	// logo gets a wide card and a tall logo gets a tall card.
 	pad := int(float64(boxSize) * padding)
-	pHalf := half + pad
-	x0 := cx - pHalf
-	y0 := cy - pHalf
-	x1 := cx + pHalf
-	y1 := cy + pHalf
-	fillRoundedRect(img, float64(x0), float64(y0), float64(x1), float64(y1), float64(pad), bg)
+	logoX0 := cx - lw/2
+	logoY0 := cy - lh/2
+	logoX1 := logoX0 + lw
+	logoY1 := logoY0 + lh
+	fillRoundedRect(img,
+		float64(logoX0-pad), float64(logoY0-pad),
+		float64(logoX1+pad), float64(logoY1+pad),
+		float64(pad), bg,
+	)
 
-	// Scale src into a boxSize×boxSize RGBA buffer (square — keeps
-	// the API simple; pre-pad your logo if you want a non-square fit).
-	buf := image.NewRGBA(image.Rect(0, 0, boxSize, boxSize))
+	// Scale src into an lw × lh RGBA buffer at full Catmull-Rom
+	// quality, then alpha-blend it onto img.
+	buf := image.NewRGBA(image.Rect(0, 0, lw, lh))
 	draw.CatmullRom.Scale(buf, buf.Bounds(), src, src.Bounds(), draw.Over, nil)
-
-	// Copy buf onto img centred at (cx, cy) with alpha blending.
-	dst := image.Rect(cx-half, cy-half, cx-half+boxSize, cy-half+boxSize)
-	draw.Draw(img, dst, buf, image.Point{}, draw.Over)
+	draw.Draw(img, image.Rect(logoX0, logoY0, logoX1, logoY1), buf, image.Point{}, draw.Over)
 }
