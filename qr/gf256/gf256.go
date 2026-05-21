@@ -109,7 +109,7 @@ func GeneratorPoly(n int) []byte {
 		// Multiply poly (degree d) by (x + alphaI) → degree d+1.
 		next := make([]byte, len(poly)+1)
 		for j, c := range poly {
-			next[j] ^= c              // c · x → next degree slot
+			next[j] ^= c                // c · x → next degree slot
 			next[j+1] ^= Mul(c, alphaI) // c · α^i → same slot, shifted
 		}
 		poly = next

@@ -4,63 +4,57 @@ import (
 	"github.com/rumo-lunar/qrlogo/qr/sym"
 )
 
-// V11-M structural constants.
+// V40-M structural constants.
 //
-// See README "Capacity budget" for the derivation. These are baked
-// into the v1 contract; widening to other versions / EC levels is a
-// v2 concern.
+// See ISO/IEC 18004 Annex D, Table 9 for the derivation.
+// Version 40, EC level M, byte mode.
 const (
-	// DataCodewordsV11M is the total number of data codewords in a
-	// V11-M QR symbol, organised across 5 RS blocks as
+	// DataCodewords is the total number of data codewords in a
+	// V40-M QR symbol, organised across 49 RS blocks as
 	//
-	//   1 × 50  +  4 × 51  =  254.
-	DataCodewordsV11M = 254
+	//   18 × 47  +  31 × 48  =  2334.
+	DataCodewords = 2334
 
-	// ECCodewordsV11M is the total number of error-correction
-	// codewords, 5 blocks × 30 EC per block.
-	ECCodewordsV11M = 150
+	// ECCodewords is the total number of error-correction
+	// codewords, 49 blocks × 28 EC per block.
+	ECCodewords = 1372
 
-	// MaxURLBytesV11M is the URL byte-length budget for v1's contract.
+	// MaxURLBytes is the URL byte-length budget for V40-M.
 	// Together with the 24 bits of byte-mode framing (4 mode + 16
 	// length + 4 terminator), this fixes the free-padding budget at
 	//
-	//   (254 − 100 − 3) × 8 = 1208 free bits.
-	MaxURLBytesV11M = 100
+	//   (2334 − len(url) − 3) × 8 free bits.
+	MaxURLBytes = 2331
 )
 
 // EncodeData builds the symbolic data-codeword sequence for a
-// byte-mode encoding of url at V11-M.
+// byte-mode encoding of url at V40-M.
 //
 // It returns:
 //
-//   - codewords: a slice of exactly DataCodewordsV11M sym.Byte values.
+//   - codewords: a slice of exactly DataCodewords sym.Byte values.
 //     The first len(url)+3 codewords are fixed (mode indicator +
 //     16-bit character count + url payload + 4-bit terminator). The
-//     remaining DataCodewordsV11M − len(url) − 3 codewords are
+//     remaining DataCodewords − len(url) − 3 codewords are
 //     symbolic padding; each carries 8 fresh free variables MSB-first.
 //   - d: a freshly constructed sym.Domain whose NumVars equals
-//     (DataCodewordsV11M − len(url) − 3) × 8.
+//     (DataCodewords − len(url) − 3) × 8.
 //
-// Variable numbering is sequential across padding codewords. The
-// first padding codeword carries variables 0..7, the second 8..15,
-// and so on. Variable n appears at MSB-position (n mod 8) of
-// codewords[(n/8) + len(url) + 3].
-//
-// Byte-mode framing for V11 (version ≥ 10) uses a 16-bit length
+// Byte-mode framing for V40 (version ≥ 10) uses a 16-bit length
 // field. The total forced bit count is 4 + 16 + 8·N + 4 = 8·(N+3),
 // always a multiple of 8, so no trailing zero-bit padding is needed.
 //
-// Panics if url is empty or longer than MaxURLBytesV11M bytes.
+// Panics if url is empty or longer than MaxURLBytes bytes.
 func EncodeData(url string) (codewords []sym.Byte, d *sym.Domain) {
 	n := len(url)
 	if n == 0 {
 		panic("qr.EncodeData: empty URL")
 	}
-	if n > MaxURLBytesV11M {
-		panic("qr.EncodeData: URL exceeds MaxURLBytesV11M")
+	if n > MaxURLBytes {
+		panic("qr.EncodeData: URL exceeds MaxURLBytes")
 	}
 
-	paddingCodewords := DataCodewordsV11M - (n + 3)
+	paddingCodewords := DataCodewords - (n + 3)
 	d = sym.NewDomain(paddingCodewords * 8)
 
 	// Pack the forced section MSB-first into n+3 bytes.
@@ -79,7 +73,7 @@ func EncodeData(url string) (codewords []sym.Byte, d *sym.Domain) {
 		panic("qr.EncodeData: unexpected forced-section length")
 	}
 
-	codewords = make([]sym.Byte, DataCodewordsV11M)
+	codewords = make([]sym.Byte, DataCodewords)
 	for i := 0; i < n+3; i++ {
 		codewords[i] = d.ConstByte(bw.buf[i])
 	}

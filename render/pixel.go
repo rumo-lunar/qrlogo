@@ -28,7 +28,7 @@ const (
 
 // String returns a one-character label useful in tests and debug dumps.
 //
-//   '.' = don't care, ' ' = white, '#' = black, '?' = unknown
+//	'.' = don't care, ' ' = white, '#' = black, '?' = unknown
 func (p PixelState) String() string {
 	switch p {
 	case PixelDontCare:

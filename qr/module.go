@@ -1,9 +1,9 @@
 // Package qr builds the symbolic QR matrix used by the qrlogo
 // constraint solver.
 //
-// The package is intentionally hardcoded for v1's contract: Version 11,
-// EC level M, byte mode, mask 2. Generalising to other versions is a
-// v2 concern.
+// The package is hardcoded for Version 40, EC level M, byte mode,
+// mask 2. Generalising to other versions or EC levels is out of
+// scope.
 package qr
 
 // Kind classifies every module of the QR matrix by what placed it.
@@ -13,7 +13,7 @@ type Kind uint8
 
 const (
 	// KindData marks a module reserved for data or EC codeword bits.
-	// These are the only positions where Phase 2 will place symbolic
+	// These are the only positions where the engine will place symbolic
 	// linear forms.
 	KindData Kind = iota
 
@@ -69,8 +69,8 @@ func (k Kind) String() string {
 	return "Unknown"
 }
 
-// v11Size is the side length in modules of a Version 11 QR symbol.
-const v11Size = 61
+// Size is the side length in modules of a Version 40 QR symbol.
+const Size = 177
 
 // Map is the per-module classification of a QR symbol.
 type Map struct {
@@ -83,57 +83,47 @@ func (m *Map) KindAt(row, col int) Kind {
 	return m.cells[row][col]
 }
 
-// NewV11Map constructs the function-pattern map for a Version 11 QR
+// NewMap constructs the function-pattern map for a Version 40 QR
 // symbol. Every cell is initialised to KindData and then overlaid by
 // each function-pattern category in an order that respects the QR
 // spec's precedence rules:
 //
 //	finder > separator > alignment > timing > version > format > dark
 //
-// The post-condition checked by tests: exactly 3232 modules remain as
-// KindData, matching V11's 404 codewords × 8 bits (with 0 remainder
+// The post-condition: exactly 3706×8 = 29648 modules remain as
+// KindData, matching V40's 3706 codewords × 8 bits (with 0 remainder
 // bits).
-func NewV11Map() *Map {
-	n := v11Size
+func NewMap() *Map {
+	n := Size
 	cells := make([][]Kind, n)
 	for r := range cells {
 		cells[r] = make([]Kind, n)
 	}
 
 	// --- 1. Finder patterns + separators at three corners ---
-	// Top-left, top-right, bottom-left (no finder bottom-right).
-	type finder struct{ r, c int } // top-left coordinate of the 7×7 block
-	finders := []finder{
-		{0, 0},
-		{0, n - 7},
-		{n - 7, 0},
-	}
-	for _, f := range finders {
-		// 7×7 finder block.
+	for _, f := range finderOrigins {
+		fr, fc := f[0], f[1]
 		for dr := 0; dr < 7; dr++ {
 			for dc := 0; dc < 7; dc++ {
-				cells[f.r+dr][f.c+dc] = KindFinder
+				cells[fr+dr][fc+dc] = KindFinder
 			}
 		}
-		// Separator: one-module ring on the data-facing edges of the
-		// finder (the edges that touch the data region, not the symbol
-		// outer edge).
 		switch {
-		case f.r == 0 && f.c == 0: // top-left
+		case fr == 0 && fc == 0: // top-left
 			for c := 0; c < 8; c++ {
 				cells[7][c] = KindSeparator
 			}
 			for r := 0; r < 7; r++ {
 				cells[r][7] = KindSeparator
 			}
-		case f.r == 0 && f.c == n-7: // top-right
+		case fr == 0 && fc == n-7: // top-right
 			for c := n - 8; c < n; c++ {
 				cells[7][c] = KindSeparator
 			}
 			for r := 0; r < 7; r++ {
 				cells[r][n-8] = KindSeparator
 			}
-		case f.r == n-7 && f.c == 0: // bottom-left
+		case fr == n-7 && fc == 0: // bottom-left
 			for c := 0; c < 8; c++ {
 				cells[n-8][c] = KindSeparator
 			}
@@ -144,27 +134,16 @@ func NewV11Map() *Map {
 	}
 
 	// --- 2. Alignment patterns ---
-	// V11 alignment-centre coordinates (ISO/IEC 18004 Annex E): 6, 30, 56.
-	// Combinations overlapping a finder corner are excluded.
-	centres := []int{6, 30, 56}
-	for _, ar := range centres {
-		for _, ac := range centres {
-			if (ar == 6 && ac == 6) ||
-				(ar == 6 && ac == 56) ||
-				(ar == 56 && ac == 6) {
-				continue
-			}
-			for dr := -2; dr <= 2; dr++ {
-				for dc := -2; dc <= 2; dc++ {
-					cells[ar+dr][ac+dc] = KindAlignment
-				}
+	forEachAlignment(func(ar, ac int) {
+		for dr := -2; dr <= 2; dr++ {
+			for dc := -2; dc <= 2; dc++ {
+				cells[ar+dr][ac+dc] = KindAlignment
 			}
 		}
-	}
+	})
 
 	// --- 3. Timing patterns ---
-	// Row 6 and column 6, filling only cells still classified as KindData
-	// (alignment and finder/separator take precedence).
+	// Row 6 and column 6, filling only cells still classified as KindData.
 	for c := 0; c < n; c++ {
 		if cells[6][c] == KindData {
 			cells[6][c] = KindTiming
@@ -177,8 +156,6 @@ func NewV11Map() *Map {
 	}
 
 	// --- 4. Version information (versions ≥ 7) ---
-	// Two 6×3 blocks: one above the bottom-left finder, one left of the
-	// top-right finder.
 	// Block A: rows 0..5, columns n-11..n-9.
 	for r := 0; r < 6; r++ {
 		for c := n - 11; c <= n-9; c++ {
@@ -193,9 +170,7 @@ func NewV11Map() *Map {
 	}
 
 	// --- 5. Format information ---
-	// 15-bit field placed in two strips around the finders.
 	// Strip A (near top-left finder):
-	//   row 8 cols 0..5, (8,7), (8,8), (7,8), rows 0..5 col 8.
 	for c := 0; c <= 5; c++ {
 		cells[8][c] = KindFormat
 	}
@@ -206,7 +181,6 @@ func NewV11Map() *Map {
 		cells[r][8] = KindFormat
 	}
 	// Strip B (split between top-right and bottom-left finders):
-	//   row 8 cols n-8..n-1, col 8 rows n-7..n-1.
 	for c := n - 8; c < n; c++ {
 		cells[8][c] = KindFormat
 	}
@@ -215,8 +189,8 @@ func NewV11Map() *Map {
 	}
 
 	// --- 6. Dark module ---
-	// Always 1, sits at (4V+9, 8). For V11 that is (53, 8).
-	cells[4*11+9][8] = KindDark
+	// Always 1, sits at (4V+9, 8). For V40 that is (169, 8).
+	cells[4*40+9][8] = KindDark
 
 	return &Map{Size: n, cells: cells}
 }

@@ -6,63 +6,35 @@ import (
 	"github.com/rumo-lunar/qrlogo/qr/sym"
 )
 
-// PlaceCodewords lays out the 404 V11 interleaved codewords (3232
-// bits) into the data region of a 61×61 grid following the QR
-// zig-zag traversal defined in ISO/IEC 18004 §7.7.3.
+// PlaceCodewords lays out the 3706 V40 interleaved codewords
+// (29648 bits) into the data region of a 177×177 grid following the
+// QR zig-zag traversal defined in ISO/IEC 18004 §7.7.3.
 //
 // Traversal rules:
 //
 //   - The matrix is swept right-to-left in 2-column-wide strips
-//     starting at column 60.
+//     starting at column n-1.
 //   - The vertical timing column (column 6) is skipped entirely:
 //     once the loop variable would land on column 6 it jumps to
 //     column 5.
 //   - Within each strip, modules are visited row by row; the right
 //     column is visited before the left column at the same row.
-//     The vertical sweep direction alternates per strip — first
-//     strip (60, 59) goes bottom-to-top, next (58, 57) top-to-
-//     bottom, and so on.
+//     The vertical sweep direction alternates per strip.
 //   - Cells whose Kind is not KindData are skipped silently. The
 //     codeword bit cursor only advances when a data cell receives a
 //     bit.
 //
-// Codeword bits are emitted MSB-first within each byte, so
-// codeword[k] bit 0 lands at the first data cell visited after
-// k·8 prior bits have already been placed.
-//
-// The returned grid has dimensions m.Size × m.Size. Non-data cells
-// hold the zero Bit (no variables, Const = 0); callers must consult
-// m to know which cells are which.
+// Codeword bits are emitted MSB-first within each byte.
 //
 // Panics if the codeword count is wrong or the placement does not
-// consume exactly Size² − (function-pattern modules) bits — both of
-// which would indicate a bug in the placement loop or in the map.
+// consume exactly Size² − (function-pattern modules) bits.
 func PlaceCodewords(d *sym.Domain, m *Map, codewords []sym.Byte) [][]sym.Bit {
-	want := DataCodewordsV11M + ECCodewordsV11M
+	want := DataCodewords + ECCodewords
 	if len(codewords) != want {
 		panic(fmt.Sprintf("qr.PlaceCodewords: got %d codewords, want %d",
 			len(codewords), want))
 	}
-	return placeCodewordsGeneric(d, m, codewords, want)
-}
 
-// PlaceCodewordsV40M lays out the 3706 V40 interleaved codewords
-// (29648 bits) into the data region of a 177×177 grid using the same
-// QR zig-zag traversal as PlaceCodewords.
-//
-// Panics if the codeword count is wrong.
-func PlaceCodewordsV40M(d *sym.Domain, m *Map, codewords []sym.Byte) [][]sym.Bit {
-	want := DataCodewordsV40M + ECCodewordsV40M
-	if len(codewords) != want {
-		panic(fmt.Sprintf("qr.PlaceCodewordsV40M: got %d codewords, want %d",
-			len(codewords), want))
-	}
-	return placeCodewordsGeneric(d, m, codewords, want)
-}
-
-// placeCodewordsGeneric is the version-independent codeword placement
-// loop. want is the expected total number of codewords (data + EC).
-func placeCodewordsGeneric(d *sym.Domain, m *Map, codewords []sym.Byte, want int) [][]sym.Bit {
 	n := m.Size
 	grid := make([][]sym.Bit, n)
 	zero := d.ConstBit(0)
@@ -95,7 +67,7 @@ func placeCodewordsGeneric(d *sym.Domain, m *Map, codewords []sym.Byte, want int
 	}
 
 	if expected := want * 8; bitIdx != expected {
-		panic(fmt.Sprintf("qr.placeCodewordsGeneric: placed %d bits, want %d",
+		panic(fmt.Sprintf("qr.PlaceCodewords: placed %d bits, want %d",
 			bitIdx, expected))
 	}
 	return grid

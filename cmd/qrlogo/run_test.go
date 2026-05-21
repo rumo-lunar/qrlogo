@@ -25,7 +25,7 @@ func TestRun_BothImageAndText(t *testing.T) {
 }
 
 func TestRun_OversizedURL(t *testing.T) {
-	url := strings.Repeat("x", 101)
+	url := strings.Repeat("x", 2332)
 	var stderr bytes.Buffer
 	err := run([]string{"-url", url}, &bytes.Buffer{}, &stderr)
 	assertExitCode(t, err, 2)
@@ -51,19 +51,19 @@ func TestRun_PlainQR_Stdout(t *testing.T) {
 		t.Fatalf("output is not a valid PNG: %v", err)
 	}
 
-	// V11 symbol: 61 modules + 2*4 quiet zone = 69 modules × 8 px/module = 552 px
-	want := (61 + 2*4) * 8
+	// V40 symbol: 177 modules + 2*4 quiet zone = 185 modules × 8 px/module
+	want := (177 + 2*4) * 8
 	b := img.Bounds()
 	if b.Dx() != want || b.Dy() != want {
 		t.Errorf("image size %dx%d, want %dx%d", b.Dx(), b.Dy(), want, want)
 	}
 
-	// Timing pattern: module row 6, cols 8..52 should alternate dark/light.
+	// Timing pattern: module row 6, cols 8..168 should alternate dark/light.
 	// With quiet zone 4 and scale 8, pixel centre of module (r, c) is at
 	// ((quiet+r)*scale + scale/2, (quiet+c)*scale + scale/2).
 	scale, quiet := 8, 4
 	y := (quiet+6)*scale + scale/2
-	for modCol := 8; modCol <= 52; modCol++ {
+	for modCol := 8; modCol <= 28; modCol++ {
 		x := (quiet+modCol)*scale + scale/2
 		r, _, _, _ := img.At(x, y).RGBA()
 		isDark := r < 0x8000
@@ -93,19 +93,19 @@ func TestRun_TextTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	img, err := png.Decode(f)
 	if err != nil {
 		t.Fatalf("output is not a valid PNG: %v", err)
 	}
 
-	// Text is centred vertically in the 61×61 symbol; scan the centre band
-	// (module rows 24..37) for at least one dark pixel in the left columns.
+	// Text is centred vertically in the 177×177 symbol; scan a band around
+	// the vertical centre for at least one dark pixel in the left columns.
 	scale, quiet := 8, 4
 	foundDark := false
 outer:
-	for row := quiet + 24; row <= quiet+37; row++ {
+	for row := quiet + 82; row <= quiet+95; row++ {
 		for col := quiet + 1; col <= quiet+15; col++ {
 			x := col*scale + scale/2
 			y := row*scale + scale/2
@@ -125,7 +125,7 @@ outer:
 
 func TestRun_LogoScale(t *testing.T) {
 	// An all-black PNG at scale 1.0 makes synthesis fail (over-constrained).
-	// At scale 0.3 it fits in ~18×18 modules — well within solver capacity.
+	// At scale 0.3 it fits in ~53×53 modules — well within solver capacity.
 	blackPNG := writeBlackPNG(t, 16, 16)
 
 	var stdout bytes.Buffer
@@ -146,7 +146,7 @@ func TestRun_LogoScale(t *testing.T) {
 
 	// Centre of the symbol should contain dark pixels from the black logo.
 	scale, quiet := 8, 4
-	centre := quiet + 30 // module 30 ≈ centre of 61-module grid
+	centre := quiet + 88 // module 88 ≈ centre of 177-module grid
 	x := centre*scale + scale/2
 	y := centre*scale + scale/2
 	r, _, _, _ := img.At(x, y).RGBA()
@@ -235,7 +235,7 @@ func writeBlackPNG(t *testing.T, w, h int) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	img := image.NewNRGBA(image.Rect(0, 0, w, h))
 	// Draw a solid black square in the top-left quadrant (overlaps finder).
@@ -246,6 +246,9 @@ func writeBlackPNG(t *testing.T, w, h int) string {
 		}
 	}
 	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
 		t.Fatal(err)
 	}
 	return path

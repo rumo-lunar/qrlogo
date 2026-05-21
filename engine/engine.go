@@ -2,7 +2,7 @@
 //
 // It ties together the four lower-level packages:
 //
-//   - /qr     produces a symbolic ghost grid for V11-M or V40-M mask 2,
+//   - /qr     produces a symbolic ghost grid for V40-M mask 2,
 //     plus a concrete grid of the spec-forced function-pattern bits.
 //   - /render produces a visual target map whose cells say
 //     "this module must be Black", "must be White", or "don't care".
@@ -23,27 +23,19 @@ import (
 
 	"github.com/rumo-lunar/qrlogo/bitset"
 	"github.com/rumo-lunar/qrlogo/qr"
-	"github.com/rumo-lunar/qrlogo/qr/sym"
 	"github.com/rumo-lunar/qrlogo/render"
 )
 
 // Options configure a single synthesis run.
 type Options struct {
-	// Version selects the QR version to generate. Supported values are
-	// 0, 11 (both produce V11-M) and 40 (produces V40-M). Defaults to
-	// V11-M when zero.
-	Version int
-
 	// URL is the byte-mode payload encoded into the QR symbol.
-	// For V11-M it must be 1..qr.MaxURLBytesV11M (100) bytes long.
-	// For V40-M it must be 1..qr.MaxURLBytesV40M (2331) bytes long.
+	// It must be 1..qr.MaxURLBytes (2331) bytes long.
 	URL string
 
 	// Target is an optional visual constraint map sized to match the
-	// QR version (61×61 for V11-M, 177×177 for V40-M). nil means
-	// no constraints, in which case the solver simply assigns the
-	// default free-variable value (zero) and the result is a plain QR
-	// symbol carrying URL.
+	// QR symbol (177×177 for V40-M). nil means no constraints, in
+	// which case the solver simply assigns the default free-variable
+	// value (zero) and the result is a plain QR symbol carrying URL.
 	Target *render.TargetMap
 
 	// BestEffort, when true, uses SolveBestEffort instead of Solve.
@@ -55,11 +47,7 @@ type Options struct {
 
 // Stats reports counters from a synthesis run.
 type Stats struct {
-	// Version is the QR version that was synthesised (11 or 40).
-	Version int
-
 	// FreeVars is the total number of GF(2) padding variables.
-	// For V11-M with a 100-byte URL this is 1208.
 	FreeVars int
 
 	// DataConstraints is the number of bitset.Rows added from the
@@ -88,14 +76,10 @@ type Stats struct {
 
 // Result is the output of one synthesis call.
 type Result struct {
-	// Symbol is the final module grid (1 = dark, 0 = light).
+	// Symbol is the final 177×177 module grid (1 = dark, 0 = light).
 	// It includes both data and function modules and already has
-	// mask 2 baked in. Size is 61×61 for V11-M and 177×177 for V40-M.
+	// mask 2 baked in.
 	Symbol [][]byte
-
-	// Solution is the raw bit vector returned by bitset.Solve,
-	// MSB-first per byte. Kept for debugging / reproducibility.
-	Solution []byte
 
 	// Stats is the counters from this run.
 	Stats Stats
@@ -114,51 +98,20 @@ func Synthesize(opts Options) (*Result, error) {
 	if opts.URL == "" {
 		return nil, fmt.Errorf("engine: empty URL")
 	}
-
-	// 1. Symbolic QR pipeline — branch on version.
-	var (
-		d        *sym.Domain
-		m        *qr.Map
-		masked   [][]sym.Bit
-		function [][]byte
-	)
-
-	switch opts.Version {
-	case 0, 11:
-		if len(opts.URL) > qr.MaxURLBytesV11M {
-			return nil, fmt.Errorf("engine: URL %d bytes exceeds v11-M budget %d",
-				len(opts.URL), qr.MaxURLBytesV11M)
-		}
-		codewords, dom := qr.EncodeData(opts.URL)
-		all := qr.InterleaveV11M(dom, codewords)
-		mm := qr.NewV11Map()
-		ghost := qr.PlaceCodewords(dom, mm, all)
-		masked = qr.ApplyMask2(dom, mm, ghost)
-		function = qr.FunctionBitsV11M()
-		m = mm
-		d = dom
-	case 40:
-		if len(opts.URL) > qr.MaxURLBytesV40M {
-			return nil, fmt.Errorf("engine: URL %d bytes exceeds v40-M budget %d",
-				len(opts.URL), qr.MaxURLBytesV40M)
-		}
-		codewords, dom := qr.EncodeDataV40M(opts.URL)
-		all := qr.InterleaveV40M(dom, codewords)
-		mm := qr.NewV40Map()
-		ghost := qr.PlaceCodewordsV40M(dom, mm, all)
-		masked = qr.ApplyMask2V40M(dom, mm, ghost)
-		function = qr.FunctionBitsV40M()
-		m = mm
-		d = dom
-	default:
-		return nil, fmt.Errorf("engine: unsupported version %d", opts.Version)
+	if len(opts.URL) > qr.MaxURLBytes {
+		return nil, fmt.Errorf("engine: URL %d bytes exceeds V40-M budget %d",
+			len(opts.URL), qr.MaxURLBytes)
 	}
 
-	version := opts.Version
-	if version == 0 {
-		version = 11
-	}
-	stats := Stats{Version: version, FreeVars: d.NumVars}
+	// 1. Symbolic QR pipeline.
+	codewords, d := qr.EncodeData(opts.URL)
+	all := qr.Interleave(d, codewords)
+	m := qr.NewMap()
+	ghost := qr.PlaceCodewords(d, m, all)
+	masked := qr.ApplyMask2(d, m, ghost)
+	function := qr.FunctionBitsFor(m)
+
+	stats := Stats{FreeVars: d.NumVars}
 
 	// 2. Build the constraint system from the target map.
 	sys := &bitset.System{NumVars: d.NumVars, Seed: noiseSeed(opts.URL, (d.NumVars+7)/8)}
@@ -167,33 +120,22 @@ func Synthesize(opts Options) (*Result, error) {
 			return nil, fmt.Errorf("engine: target size %dx%d, want %dx%d",
 				opts.Target.W, opts.Target.H, m.Size, m.Size)
 		}
-		for r := 0; r < m.Size; r++ {
-			for c := 0; c < m.Size; c++ {
-				ps := opts.Target.At(r, c)
-				if ps == render.PixelDontCare {
-					continue
+		opts.Target.ForEachConstraint(func(r, c int, wantBit byte) {
+			if m.KindAt(r, c) != qr.KindData {
+				if function[r][c] != wantBit {
+					stats.FunctionConflicts++
+				} else {
+					stats.FunctionAlignments++
 				}
-				wantBit := byte(0)
-				if ps == render.PixelBlack {
-					wantBit = 1
-				}
-				if m.KindAt(r, c) != qr.KindData {
-					if function[r][c] != wantBit {
-						stats.FunctionConflicts++
-					} else {
-						stats.FunctionAlignments++
-					}
-					continue
-				}
-				b := masked[r][c]
-				row := bitset.Row{
-					Vars:   append([]uint64(nil), b.Vars...),
-					Target: (wantBit ^ b.Const) & 1,
-				}
-				sys.Rows = append(sys.Rows, row)
-				stats.DataConstraints++
+				return
 			}
-		}
+			b := masked[r][c]
+			sys.Rows = append(sys.Rows, bitset.Row{
+				Vars:   append([]uint64(nil), b.Vars...),
+				Target: (wantBit ^ b.Const) & 1,
+			})
+			stats.DataConstraints++
+		})
 	}
 
 	// 3. Solve.
@@ -229,9 +171,8 @@ func Synthesize(opts Options) (*Result, error) {
 	}
 
 	return &Result{
-		Symbol:   grid,
-		Solution: solution,
-		Stats:    stats,
+		Symbol: grid,
+		Stats:  stats,
 	}, nil
 }
 

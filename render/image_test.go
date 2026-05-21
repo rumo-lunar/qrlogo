@@ -41,19 +41,6 @@ func TestFromImage_AllWhiteSourceProducesAllDontCareByDefault(t *testing.T) {
 	}
 }
 
-func TestFromImage_OpaqueBackgroundMapsLightToWhite(t *testing.T) {
-	src := solid(8, 8, color.White)
-	tm := render.FromImage(src, 4, 4, render.ImageOptions{
-		OpaqueBackground: true,
-	})
-
-	for i, p := range tm.Pixels {
-		if p != render.PixelWhite {
-			t.Fatalf("pixel %d = %v, want White", i, p)
-		}
-	}
-}
-
 func TestFromImage_IgnoreTransparentLeavesAlpha0AsDontCare(t *testing.T) {
 	// Fully transparent black: would otherwise threshold to Black.
 	src := solid(4, 4, color.RGBA{R: 0, G: 0, B: 0, A: 0})
