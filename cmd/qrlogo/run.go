@@ -10,6 +10,9 @@ import (
 	"io"
 	"os"
 
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
+
 	"github.com/rumo-lunar/qrlogo/engine"
 	"github.com/rumo-lunar/qrlogo/qr"
 	"github.com/rumo-lunar/qrlogo/render"
@@ -35,6 +38,8 @@ func run(args []string, stdout, stderr io.Writer) error {
 	urlFlag := fs.String("url", "", "byte-mode payload (required, ≤2331 bytes)")
 	imageFlag := fs.String("image", "", "path to PNG/JPEG/GIF logo image")
 	textFlag := fs.String("text", "", "text to embed as logo")
+	fontFlag := fs.String("font", "", "path to TTF/OTF font for -text (default: built-in basicfont 7×13)")
+	fontSizeFlag := fs.Float64("font-size", 64, "font size in pixels for -text when -font is set")
 	outFlag := fs.String("out", "qrlogo.png", `output PNG path ("-" for stdout)`)
 	scaleFlag := fs.Int("scale", 8, "pixels per QR module")
 	quietFlag := fs.Int("quiet", 4, "quiet-zone modules")
@@ -59,11 +64,17 @@ func run(args []string, stdout, stderr io.Writer) error {
 	if *imageFlag != "" && *textFlag != "" {
 		return exitf(1, "qrlogo: -image and -text are mutually exclusive")
 	}
+	if *fontFlag != "" && *textFlag == "" {
+		return exitf(1, "qrlogo: -font requires -text")
+	}
+	if *fontSizeFlag <= 0 {
+		return exitf(1, "qrlogo: -font-size must be > 0")
+	}
 	if *logoScaleFlag <= 0 || *logoScaleFlag > 1 {
 		return exitf(1, "qrlogo: -logo-scale must be in (0, 1]")
 	}
 
-	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag, qr.Size)
+	target, err := buildTarget(*imageFlag, *textFlag, *fontFlag, *fontSizeFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag, qr.Size)
 	if err != nil {
 		return exitf(2, "qrlogo: %v", err)
 	}
@@ -109,7 +120,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScale float64, gridSize int) (*render.TargetMap, error) {
+func buildTarget(imagePath, text, fontPath string, fontSize float64, threshold uint32, noHalo bool, logoScale float64, gridSize int) (*render.TargetMap, error) {
 	// sub is the side length of the logo region within the grid.
 	sub := int(float64(gridSize) * logoScale)
 	if sub < 1 {
@@ -139,7 +150,19 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		})
 
 	case text != "":
-		inner = render.RenderText(text, sub, sub)
+		var opts render.TextOptions
+		if fontPath != "" {
+			face, err := loadFontFace(fontPath, fontSize)
+			if err != nil {
+				return nil, err
+			}
+			defer func() { _ = face.Close() }()
+			opts.Face = face
+			// Anti-aliased TTF edges → threshold mid-alpha to keep
+			// only the solid glyph core as hard PixelBlack constraints.
+			opts.AlphaThreshold = 0x8000
+		}
+		inner = render.RenderText(text, sub, sub, opts)
 	}
 
 	if inner == nil {
@@ -207,4 +230,27 @@ func cropTransparent(src image.Image) image.Image {
 		return si.SubImage(image.Rect(minX, minY, maxX+1, maxY+1))
 	}
 	return src
+}
+
+// loadFontFace reads a TTF/OTF file and returns a font.Face rendered at
+// the requested pixel size. The caller is responsible for Close()ing
+// the returned face.
+func loadFontFace(path string, sizePx float64) (font.Face, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read font %q: %w", path, err)
+	}
+	parsed, err := opentype.Parse(data)
+	if err != nil {
+		return nil, fmt.Errorf("cannot parse font %q: %w", path, err)
+	}
+	face, err := opentype.NewFace(parsed, &opentype.FaceOptions{
+		Size:    sizePx,
+		DPI:     72, // 72 DPI → Size is in pixels.
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("cannot create font face from %q: %w", path, err)
+	}
+	return face, nil
 }

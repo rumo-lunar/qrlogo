@@ -81,6 +81,8 @@ qrlogo -url "https://lunar.app" -text "HI" -out qrtext.png
 | `-url`         | *(required)* | Byte-mode payload (≤ 2331 bytes).                                            |
 | `-image`       | `""`         | Path to PNG/JPEG/GIF logo image. Mutually exclusive with `-text`.            |
 | `-text`        | `""`         | Text to embed as logo. Mutually exclusive with `-image`.                     |
+| `-font`        | `""`         | Path to a TTF/OTF font for `-text`. Empty = built-in basicfont 7×13.         |
+| `-font-size`   | `64`         | Font size in pixels for `-text` when `-font` is set.                         |
 | `-out`         | `qrlogo.png` | Output PNG path (`-` for stdout).                                            |
 | `-scale`       | `8`          | Pixels per QR module.                                                        |
 | `-quiet`       | `4`          | Quiet-zone modules around the symbol.                                        |
