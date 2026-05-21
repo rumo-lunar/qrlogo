@@ -76,19 +76,29 @@ qrlogo -url "https://lunar.app" -text "HI" -out qrtext.png
 
 ### CLI flags
 
-| Flag           | Default      | Description                                                       |
-|----------------|--------------|-------------------------------------------------------------------|
-| `-url`         | *(required)* | Byte-mode payload. Must be ≤ 2331 bytes.                          |
-| `-image`       | `""`         | Path to a PNG/JPEG/GIF logo to embed.                             |
-| `-text`        | `""`         | Alternative to `-image`: render this string as the target.        |
-| `-out`         | `qrlogo.png` | Output PNG path. Use `-` for stdout.                              |
-| `-scale`       | `8`          | Pixels per QR module.                                             |
-| `-quiet`       | `4`          | Quiet-zone width in modules.                                      |
-| `-threshold`   | `0x8000`     | Luminance cutoff for image thresholding `[0, 65535]`.             |
-| `-no-halo`     | `false`      | Skip the 8-neighbour halo around dark logo cells.                 |
-| `-logo-scale`  | `1.0`        | Fraction of the grid the logo fills `(0, 1]`. Centred.            |
-| `-best-effort` | `false`      | Skip contradicting constraints instead of failing.                |
-| `-stats`       | `false`      | Print synthesis stats to stderr.                                  |
+| Flag           | Default      | Description                                                                  |
+|----------------|--------------|------------------------------------------------------------------------------|
+| `-url`         | *(required)* | Byte-mode payload (≤ 2331 bytes).                                            |
+| `-image`       | `""`         | Path to PNG/JPEG/GIF logo image. Mutually exclusive with `-text`.            |
+| `-text`        | `""`         | Text to embed as logo. Mutually exclusive with `-image`.                     |
+| `-out`         | `qrlogo.png` | Output PNG path (`-` for stdout).                                            |
+| `-scale`       | `8`          | Pixels per QR module.                                                        |
+| `-quiet`       | `4`          | Quiet-zone modules around the symbol.                                        |
+| `-threshold`   | `0x8000`     | Luminance cutoff for image thresholding `[0, 65535]`.                        |
+| `-no-halo`     | `false`      | Skip the 8-neighbour halo around dark logo cells.                            |
+| `-logo-scale`  | `1.0`        | Fraction of the QR grid the logo fills, in `(0, 1]`. Logo is centred.        |
+| `-best-effort` | `false`      | Skip contradicting constraints instead of failing (good for dense logos).    |
+| `-stats`       | `false`      | Print synthesis stats to stderr.                                             |
+
+Exit codes:
+
+| Code | Meaning                                                          |
+|------|------------------------------------------------------------------|
+| `0`  | Success.                                                         |
+| `1`  | Invalid arguments (missing `-url`, mutually exclusive flags, …). |
+| `2`  | Invalid input (oversized URL, unreadable image, …).              |
+| `3`  | Synthesis failed (over-constrained without `-best-effort`).      |
+| `4`  | Output write failed.                                             |
 
 > [!TIP]
 > If a dense logo over-constrains the solver, pass `-best-effort` to silently drop contradicting equations and approximate the image instead of erroring.
