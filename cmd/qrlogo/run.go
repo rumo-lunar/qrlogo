@@ -23,12 +23,16 @@ type exitError struct {
 
 func (e *exitError) Error() string { return e.msg }
 
+// exitf builds an *exitError with a formatted message.
+func exitf(code int, format string, args ...any) *exitError {
+	return &exitError{code: code, msg: fmt.Sprintf(format, args...)}
+}
+
 func run(args []string, stdout, stderr io.Writer) error {
 	fs := flag.NewFlagSet("qrlogo", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 
-	urlFlag := fs.String("url", "", "byte-mode payload (required, ≤100 bytes for v11, ≤2331 bytes for v40)")
-	versionFlag := fs.Int("version", 11, "QR version (11 or 40)")
+	urlFlag := fs.String("url", "", "byte-mode payload (required, ≤2331 bytes)")
 	imageFlag := fs.String("image", "", "path to PNG/JPEG/GIF logo image")
 	textFlag := fs.String("text", "", "text to embed as logo")
 	outFlag := fs.String("out", "qrlogo.png", `output PNG path ("-" for stdout)`)
@@ -41,84 +45,66 @@ func run(args []string, stdout, stderr io.Writer) error {
 	bestEffortFlag := fs.Bool("best-effort", false, "skip contradicting constraints instead of failing (recommended for dense logos)")
 
 	if err := fs.Parse(args); err != nil {
-		return &exitError{code: 1, msg: err.Error()}
+		return exitf(1, "%s", err.Error())
 	}
 
 	if *urlFlag == "" {
-		fmt.Fprintln(stderr, "qrlogo: -url is required")
+		_, _ = fmt.Fprintln(stderr, "qrlogo: -url is required")
 		fs.Usage()
-		return &exitError{code: 1, msg: "-url is required"}
+		return exitf(1, "-url is required")
 	}
-	switch *versionFlag {
-	case 11:
-		if len(*urlFlag) > qr.MaxURLBytesV11M {
-			return &exitError{
-				code: 2,
-				msg:  fmt.Sprintf("qrlogo: URL is %d bytes, maximum is %d for v11", len(*urlFlag), qr.MaxURLBytesV11M),
-			}
-		}
-	case 40:
-		if len(*urlFlag) > qr.MaxURLBytesV40M {
-			return &exitError{
-				code: 2,
-				msg:  fmt.Sprintf("qrlogo: URL is %d bytes, maximum is %d for v40", len(*urlFlag), qr.MaxURLBytesV40M),
-			}
-		}
-	default:
-		return &exitError{code: 1, msg: fmt.Sprintf("qrlogo: unsupported -version %d (use 11 or 40)", *versionFlag)}
+	if len(*urlFlag) > qr.MaxURLBytes {
+		return exitf(2, "qrlogo: URL is %d bytes, maximum is %d", len(*urlFlag), qr.MaxURLBytes)
 	}
 	if *imageFlag != "" && *textFlag != "" {
-		return &exitError{code: 1, msg: "qrlogo: -image and -text are mutually exclusive"}
+		return exitf(1, "qrlogo: -image and -text are mutually exclusive")
 	}
 	if *logoScaleFlag <= 0 || *logoScaleFlag > 1 {
-		return &exitError{code: 1, msg: "qrlogo: -logo-scale must be in (0, 1]"}
+		return exitf(1, "qrlogo: -logo-scale must be in (0, 1]")
 	}
 
-	gridSize := 61
-	if *versionFlag == 40 {
-		gridSize = 177
-	}
-
-	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag, gridSize)
+	target, err := buildTarget(*imageFlag, *textFlag, uint32(*threshFlag), *noHaloFlag, *logoScaleFlag, qr.Size)
 	if err != nil {
-		return &exitError{code: 2, msg: fmt.Sprintf("qrlogo: %v", err)}
+		return exitf(2, "qrlogo: %v", err)
 	}
 
 	result, err := engine.Synthesize(engine.Options{
-		Version:    *versionFlag,
 		URL:        *urlFlag,
 		Target:     target,
 		BestEffort: *bestEffortFlag,
 	})
 	if err != nil {
-		return &exitError{code: 3, msg: fmt.Sprintf("qrlogo: synthesis failed: %v", err)}
+		return exitf(3, "qrlogo: synthesis failed: %v", err)
 	}
 
 	if *statsFlag {
 		s := result.Stats
-		fmt.Fprintf(stderr, "free vars        : %d\n", s.FreeVars)
-		fmt.Fprintf(stderr, "data constraints : %d\n", s.DataConstraints)
-		fmt.Fprintf(stderr, "function aligns  : %d\n", s.FunctionAlignments)
-		fmt.Fprintf(stderr, "function conflicts: %d\n", s.FunctionConflicts)
-		fmt.Fprintf(stderr, "skipped conflicts: %d\n", s.SkippedConflicts)
+		_, _ = fmt.Fprintf(stderr, "free vars        : %d\n", s.FreeVars)
+		_, _ = fmt.Fprintf(stderr, "data constraints : %d\n", s.DataConstraints)
+		_, _ = fmt.Fprintf(stderr, "function aligns  : %d\n", s.FunctionAlignments)
+		_, _ = fmt.Fprintf(stderr, "function conflicts: %d\n", s.FunctionConflicts)
+		_, _ = fmt.Fprintf(stderr, "skipped conflicts: %d\n", s.SkippedConflicts)
 	}
 
 	pngOpts := engine.PNGOptions{Scale: *scaleFlag, QuietZone: *quietFlag}
 	if *outFlag == "-" {
 		if err := result.EncodePNG(stdout, pngOpts); err != nil {
-			return &exitError{code: 4, msg: fmt.Sprintf("qrlogo: write failed: %v", err)}
+			return exitf(4, "qrlogo: write failed: %v", err)
 		}
 		return nil
 	}
 
 	f, err := os.Create(*outFlag)
 	if err != nil {
-		return &exitError{code: 4, msg: fmt.Sprintf("qrlogo: cannot create output file: %v", err)}
+		return exitf(4, "qrlogo: cannot create output file: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if err := result.EncodePNG(f, pngOpts); err != nil {
-		return &exitError{code: 4, msg: fmt.Sprintf("qrlogo: write failed: %v", err)}
+		return exitf(4, "qrlogo: write failed: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		return exitf(4, "qrlogo: close failed: %v", err)
 	}
 	return nil
 }
@@ -140,7 +126,7 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		if err != nil {
 			return nil, fmt.Errorf("cannot open image %q: %w", imagePath, err)
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 
 		src, _, err := image.Decode(f)
 		if err != nil {
@@ -153,7 +139,7 @@ func buildTarget(imagePath, text string, threshold uint32, noHalo bool, logoScal
 		})
 
 	case text != "":
-		inner = render.RenderText(text, sub, sub, render.TextOptions{})
+		inner = render.RenderText(text, sub, sub)
 	}
 
 	if inner == nil {

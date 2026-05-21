@@ -1,6 +1,6 @@
 package qr
 
-// Function-pattern bit values for a V11 QR symbol with EC level M
+// Function-pattern bit values for a V40 QR symbol with EC level M
 // and mask 2 applied. These are the concrete bits forced by the QR
 // spec at every non-data module; the engine reads them to decide
 // whether an image pixel that lands on a function-pattern cell is
@@ -11,30 +11,31 @@ package qr
 // format info, §7.10 for version info) and reproduced here as
 // literals so the values are auditable from a single page.
 
-// FormatV11MMask2 is the 15-bit format string for EC level M and
-// mask pattern 2:
+// FormatMMask2 is the 15-bit format string for EC level M and
+// mask pattern 2. Format information depends only on EC level and
+// mask, not on the QR version.
 //
-//   1. EC-level bits  M  = "00"      (ISO Table 12)
-//   2. Mask number    2  = "010"     (ISO Table 23)
-//   3. 5-bit field    = "00010"
-//   4. BCH(15, 5)     append 10 zero bits, divide by
-//      G(x) = x^10 + x^8 + x^5 + x^4 + x^2 + x + 1, take remainder
-//      → 0001010011 01110 (15 bits)
-//   5. XOR with mask 0x5412 = 101010000010010
-//      → 101111001111100
+//  1. EC-level bits  M  = "00"      (ISO Table 12)
+//  2. Mask number    2  = "010"     (ISO Table 23)
+//  3. 5-bit field    = "00010"
+//  4. BCH(15, 5)     append 10 zero bits, divide by
+//     G(x) = x^10 + x^8 + x^5 + x^4 + x^2 + x + 1, take remainder
+//     → 0001010011 01110 (15 bits)
+//  5. XOR with mask 0x5412 = 101010000010010
+//     → 101111001111100
 //
 // MSB-first, so bit 14 (=1) is the leftmost bit.
-const FormatV11MMask2 uint16 = 0b101111001111100
+const FormatMMask2 uint16 = 0b101111001111100
 
-// VersionV11 is the 18-bit version-information string for Version 11:
+// VersionInfo is the 18-bit version-information string for Version 40:
 //
-//   1. Version number 11 = "001011" (6 bits)
-//   2. BCH(18, 6) by G(x) = x^12 + x^11 + x^10 + x^9 + x^8 + x^5 + x^2 + 1
-//      remainder = 101111110110 (12 bits)
-//   3. Concatenated: 001011 101111110110
+//  1. Version number 40 = "101000" (6 bits)
+//  2. BCH(18, 6) by G(x) = x^12 + x^11 + x^10 + x^9 + x^8 + x^5 + x^2 + 1
+//     remainder = 110001101001 (12 bits)
+//  3. Concatenated: 101000 110001101001
 //
-// MSB-first, so bit 17 (=0) is the leftmost bit.
-const VersionV11 uint32 = 0b001011101111110110
+// MSB-first, so bit 17 (=1) is the leftmost bit.
+const VersionInfo uint32 = 0b101000110001101001
 
 // finderPattern is the 7×7 dark/light pattern of the QR finder.
 var finderPattern = [7][7]byte{
@@ -56,47 +57,49 @@ var alignmentPattern = [5][5]byte{
 	{1, 1, 1, 1, 1},
 }
 
-// FunctionBitsV11M returns the 61×61 grid of concrete bit values
-// (0 = light, 1 = dark) for every non-data cell of a V11 QR symbol
+// FunctionBits returns the 177×177 grid of concrete bit values
+// (0 = light, 1 = dark) for every non-data cell of a V40 QR symbol
 // with EC level M and mask 2. KindData cells are zero-filled
 // placeholders; callers combine this grid with the symbolic data
 // grid produced by ApplyMask2(PlaceCodewords(…)) to obtain the full
-// rendered symbol once /bitset has solved for the free variables.
+// rendered symbol once the solver has assigned the free variables.
 //
 // Cells set here:
 //
 //   - finder patterns at the three corners,
 //   - separators (left as 0, the spec value),
 //   - timing patterns on row 6 and column 6,
-//   - 6 alignment patterns at centres {6,30,56}×{6,30,56} minus
-//     finder overlaps,
-//   - dark module at (53, 8),
-//   - 30 format-info modules with FormatV11MMask2,
-//   - 36 version-info modules with VersionV11.
-func FunctionBitsV11M() [][]byte {
-	n := v11Size
+//   - 46 alignment patterns at the non-excluded combinations of
+//     {6,30,58,86,114,142,170}×{6,30,58,86,114,142,170},
+//   - dark module at (169, 8),
+//   - 30 format-info modules with FormatMMask2,
+//   - 36 version-info modules with VersionInfo.
+func FunctionBits() [][]byte {
+	return FunctionBitsFor(NewMap())
+}
+
+// FunctionBitsFor is FunctionBits but reuses an already-built Map.
+// Callers that already constructed a Map (e.g. the engine) should
+// prefer this to avoid rebuilding the 177×177 Kind grid twice.
+func FunctionBitsFor(m *Map) [][]byte {
+	n := Size
 	g := make([][]byte, n)
 	for r := range g {
 		g[r] = make([]byte, n)
 	}
 
-	placeFinders(g, n)
-	placeTiming(g, n)
-	placeAlignment(g, n)
+	placeFinders(g)
+	placeTiming(g, m)
+	placeAlignment(g)
 	placeDarkModule(g)
-	placeFormatBits(g, n, FormatV11MMask2)
-	placeVersionBits(g, n, VersionV11)
+	placeFormatBits(g, n, FormatMMask2)
+	placeVersionBits(g, n, VersionInfo)
 	// Separators stay 0 — they are always light by spec.
 	return g
 }
 
-func placeFinders(g [][]byte, n int) {
-	corners := [3][2]int{
-		{0, 0},
-		{0, n - 7},
-		{n - 7, 0},
-	}
-	for _, p := range corners {
+func placeFinders(g [][]byte) {
+	for _, p := range finderOrigins {
 		for dr := 0; dr < 7; dr++ {
 			for dc := 0; dc < 7; dc++ {
 				g[p[0]+dr][p[1]+dc] = finderPattern[dr][dc]
@@ -105,55 +108,42 @@ func placeFinders(g [][]byte, n int) {
 	}
 }
 
-// placeTiming fills the timing modules at row 6 and column 6. The
-// pattern alternates starting from dark; only cells whose Kind is
-// KindTiming (per NewV11Map) are written, which correctly handles
-// the gaps where alignment patterns interrupt the timing strips.
+// placeTiming fills the timing modules at row 6 and column 6, using
+// the supplied Map to respect alignment-pattern precedence.
 //
 // Formula: a timing module is dark iff its varying coordinate is
 // even. Horizontal strip (row 6) uses column index; vertical strip
 // (col 6) uses row index.
-func placeTiming(g [][]byte, n int) {
-	m := NewV11Map()
-	for r := 0; r < n; r++ {
-		for c := 0; c < n; c++ {
+func placeTiming(g [][]byte, m *Map) {
+	for r := 0; r < m.Size; r++ {
+		for c := 0; c < m.Size; c++ {
 			if m.KindAt(r, c) != KindTiming {
 				continue
 			}
-			var darkIfEven int
-			if r == 6 {
-				darkIfEven = c
-			} else {
-				darkIfEven = r
+			coord := c
+			if c == 6 {
+				coord = r
 			}
-			if darkIfEven%2 == 0 {
+			if coord%2 == 0 {
 				g[r][c] = 1
 			}
 		}
 	}
 }
 
-func placeAlignment(g [][]byte, n int) {
-	// V11 alignment centres from ISO Annex E.
-	centres := [3]int{6, 30, 56}
-	for _, ar := range centres {
-		for _, ac := range centres {
-			if (ar == 6 && ac == 6) ||
-				(ar == 6 && ac == 56) ||
-				(ar == 56 && ac == 6) {
-				continue
-			}
-			for dr := -2; dr <= 2; dr++ {
-				for dc := -2; dc <= 2; dc++ {
-					g[ar+dr][ac+dc] = alignmentPattern[dr+2][dc+2]
-				}
+// placeAlignment writes the 46 alignment patterns for V40.
+func placeAlignment(g [][]byte) {
+	forEachAlignment(func(ar, ac int) {
+		for dr := -2; dr <= 2; dr++ {
+			for dc := -2; dc <= 2; dc++ {
+				g[ar+dr][ac+dc] = alignmentPattern[dr+2][dc+2]
 			}
 		}
-	}
+	})
 }
 
 func placeDarkModule(g [][]byte) {
-	g[4*11+9][8] = 1 // (53, 8) for V11
+	g[4*40+9][8] = 1 // (169, 8) for V40
 }
 
 // placeFormatBits writes the 15-bit format string at the two

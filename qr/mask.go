@@ -5,8 +5,8 @@ import (
 )
 
 // ApplyMask2 returns a new ghost grid with QR data-mask pattern 2
-// applied. The mask flips a data-region bit whenever its column
-// index is divisible by 3:
+// applied to a V40 symbol. The mask flips a data-region bit whenever
+// its column index is divisible by 3:
 //
 //	mask₂(row, col) = 1 ⟺ col mod 3 == 0
 //
@@ -19,8 +19,7 @@ import (
 // involution: ApplyMask2(ApplyMask2(g, m), m) == g cell-by-cell.
 //
 // The returned grid is a fresh allocation: the input grid is not
-// mutated and the new sym.Bit values do not alias the originals'
-// Vars slices on cells the mask actually flipped.
+// mutated.
 func ApplyMask2(d *sym.Domain, m *Map, grid [][]sym.Bit) [][]sym.Bit {
 	out := make([][]sym.Bit, m.Size)
 	for r := range out {

@@ -62,8 +62,8 @@ func TestEncodeRS_ConstantData_MatchesReference(t *testing.T) {
 	}{
 		{"tiny", []byte{0x40, 0x00, 0x16, 0x10}, 7},
 		{"deadbeef-10ec", []byte{0xDE, 0xAD, 0xBE, 0xEF}, 10},
-		{"v11m-block-size-30ec", make([]byte, 50), 30},
-		{"v11m-block-size-51-30ec", makePattern(51, 0xA5), 30},
+		{"v40m-block-size-30ec", make([]byte, 50), 30},
+		{"v40m-block-size-51-30ec", makePattern(51, 0xA5), 30},
 		{"all-zero-30ec", make([]byte, 51), 30},
 		{"all-ones-30ec", makePattern(51, 0xFF), 30},
 	}
@@ -95,9 +95,8 @@ func TestEncodeRS_ConstantData_MatchesReference(t *testing.T) {
 }
 
 func TestEncodeRS_LinearityAgainstReference(t *testing.T) {
-	// Arrange: 50 data codewords (V11-M smallest block size), the
-	// first 24 constant and the next 26 fully symbolic (208 vars).
-	// numEC = 30 (V11-M).
+	// Arrange: 50 data codewords, the first 24 constant and the
+	// next 26 fully symbolic (208 vars). numEC = 30.
 	const (
 		dataLen  = 50
 		constLen = 24

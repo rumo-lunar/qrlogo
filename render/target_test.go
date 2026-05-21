@@ -66,13 +66,34 @@ func TestAt_PanicsOutOfBounds(t *testing.T) {
 	}
 }
 
-func TestClone_IsIndependent(t *testing.T) {
-	a := render.New(2, 2)
-	a.Set(0, 0, render.PixelBlack)
-	b := a.Clone()
-	b.Set(0, 0, render.PixelWhite)
-	if a.At(0, 0) != render.PixelBlack {
-		t.Errorf("clone mutation leaked back; got %v", a.At(0, 0))
+func TestForEachConstraint_VisitsOnlyBlackAndWhite(t *testing.T) {
+	tm := render.New(3, 2)
+	tm.Set(0, 0, render.PixelBlack)
+	tm.Set(0, 1, render.PixelBlack)
+	tm.Set(1, 0, render.PixelWhite)
+	// (0,2), (1,1), (1,2) remain DontCare and must be skipped.
+
+	type visit struct {
+		r, c int
+		bit  byte
+	}
+	var got []visit
+	tm.ForEachConstraint(func(r, c int, wantBit byte) {
+		got = append(got, visit{r, c, wantBit})
+	})
+
+	want := []visit{
+		{0, 0, 1},
+		{0, 1, 1},
+		{1, 0, 0},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d visits, want %d (%v)", len(got), len(want), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("visit %d = %+v, want %+v", i, got[i], w)
+		}
 	}
 }
 
