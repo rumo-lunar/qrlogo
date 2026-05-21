@@ -46,7 +46,8 @@ type PNGOptions struct {
 
 	// LogoPadding is the padding rendered as a solid Background
 	// rectangle behind the logo, as a fraction of the logo box.
-	// Zero means 0.10 when Logo is set.
+	// Zero (the default) means no padding card is drawn — the logo
+	// is composited directly on top of the QR modules.
 	LogoPadding float64
 }
 
@@ -63,14 +64,12 @@ func (o PNGOptions) resolved() PNGOptions {
 	if o.Background == nil {
 		o.Background = color.White
 	}
-	if o.Logo != nil {
-		if o.LogoCoverage == 0 {
-			o.LogoCoverage = 0.18
-		}
-		if o.LogoPadding == 0 {
-			o.LogoPadding = 0.10
-		}
+	if o.Logo != nil && o.LogoCoverage == 0 {
+		o.LogoCoverage = 0.18
 	}
+	// LogoPadding is intentionally NOT defaulted: zero means
+	// "no padding card", which is a useful behaviour rather than
+	// an unset sentinel.
 	return o
 }
 
