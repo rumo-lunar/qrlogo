@@ -1,14 +1,15 @@
+// Package qr is the byte-level QR Code encoder. It exposes the
+// per-version, per-EC-level pipeline (data → padding → RS → interleave
+// → place → mask) on top of the spec tables in qr/spec.
+//
+// The package operates on plain []byte / [][]byte values; the symbolic
+// QArt machinery that used to live here has been removed.
 package qr
 
-import (
-	"github.com/rumo-lunar/qrlogo/qr/gf256"
-	"github.com/rumo-lunar/qrlogo/qr/sym"
-)
+import "github.com/rumo-lunar/qrlogo/qr/gf256"
 
 // EncodeRS computes numEC Reed–Solomon error-correction codewords
-// over the given symbolic data codewords.
-//
-// Mathematically, it returns the coefficients of
+// over the given data codewords. It returns the coefficients of
 //
 //	(data(x) · x^numEC) mod g(x)
 //
@@ -16,15 +17,8 @@ import (
 // produced by gf256.GeneratorPoly. The returned slice has length
 // numEC; the first element is the highest-degree coefficient.
 //
-// Because every operation used is either symbolic XOR or
-// multiplication by a concrete GF(256) constant (both of which are
-// linear over GF(2)), every output Bit ends up as a linear form in
-// the free variables of d plus a fixed constant offset contributed
-// by the URL bits. This linearity is the property /engine relies on
-// when pinning image pixels against ghost-grid modules.
-//
 // Panics if numEC <= 0 or len(data) == 0.
-func EncodeRS(d *sym.Domain, data []sym.Byte, numEC int) []sym.Byte {
+func EncodeRS(data []byte, numEC int) []byte {
 	if numEC <= 0 {
 		panic("qr.EncodeRS: numEC must be positive")
 	}
@@ -36,20 +30,19 @@ func EncodeRS(d *sym.Domain, data []sym.Byte, numEC int) []sym.Byte {
 
 	// Working buffer: data followed by numEC zero codewords. This is
 	// the polynomial data(x) · x^numEC.
-	work := make([]sym.Byte, len(data)+numEC)
+	work := make([]byte, len(data)+numEC)
 	copy(work, data)
-	zero := d.ConstByte(0)
-	for i := len(data); i < len(work); i++ {
-		work[i] = zero
-	}
 
-	// Polynomial long division. At step i, work[i] is the leading
-	// symbolic coefficient; we subtract lead · g(x) · x^(deg-i) to
-	// cancel it, then advance. Subtraction in GF(256) is XOR.
+	// Synthetic polynomial long division. At step i, work[i] is the
+	// leading coefficient; subtract lead · g(x) · x^(deg-i) to cancel
+	// it, then advance. Subtraction in GF(256) is XOR.
 	for i := 0; i < len(data); i++ {
 		lead := work[i]
+		if lead == 0 {
+			continue
+		}
 		for j := 0; j <= numEC; j++ {
-			work[i+j] = d.XorByte(work[i+j], d.MulConst(lead, g[j]))
+			work[i+j] ^= gf256.Mul(lead, g[j])
 		}
 	}
 

@@ -1,110 +1,184 @@
 package qr
 
 import (
-	"github.com/rumo-lunar/qrlogo/qr/sym"
+	"fmt"
+
+	"github.com/rumo-lunar/qrlogo/qr/spec"
 )
 
-// V40-M structural constants.
+// EncodeBytes builds the complete data + EC codeword stream for s
+// carrying payload, interleaved per ISO/IEC 18004 §7.6 and padded
+// with the version's remainder bits.
 //
-// See ISO/IEC 18004 Annex D, Table 9 for the derivation.
-// Version 40, EC level M, byte mode.
-const (
-	// DataCodewords is the total number of data codewords in a
-	// V40-M QR symbol, organised across 49 RS blocks as
-	//
-	//   18 × 47  +  31 × 48  =  2334.
-	DataCodewords = 2334
-
-	// ECCodewords is the total number of error-correction
-	// codewords, 49 blocks × 28 EC per block.
-	ECCodewords = 1372
-
-	// MaxURLBytes is the URL byte-length budget for V40-M.
-	// Together with the 24 bits of byte-mode framing (4 mode + 16
-	// length + 4 terminator), this fixes the free-padding budget at
-	//
-	//   (2334 − len(url) − 3) × 8 free bits.
-	MaxURLBytes = 2331
-)
-
-// EncodeData builds the symbolic data-codeword sequence for a
-// byte-mode encoding of url at V40-M.
+// The returned slice has length s.TotalCodewords(); the high
+// remainder bits (0..7) for versions that need them are appended as
+// trailing zero bits inside the final byte. Callers that need the
+// exact bit stream for placement use [BitStream].
 //
-// It returns:
-//
-//   - codewords: a slice of exactly DataCodewords sym.Byte values.
-//     The first len(url)+3 codewords are fixed (mode indicator +
-//     16-bit character count + url payload + 4-bit terminator). The
-//     remaining DataCodewords − len(url) − 3 codewords are
-//     symbolic padding; each carries 8 fresh free variables MSB-first.
-//   - d: a freshly constructed sym.Domain whose NumVars equals
-//     (DataCodewords − len(url) − 3) × 8.
-//
-// Byte-mode framing for V40 (version ≥ 10) uses a 16-bit length
-// field. The total forced bit count is 4 + 16 + 8·N + 4 = 8·(N+3),
-// always a multiple of 8, so no trailing zero-bit padding is needed.
-//
-// Panics if url is empty or longer than MaxURLBytes bytes.
-func EncodeData(url string) (codewords []sym.Byte, d *sym.Domain) {
-	n := len(url)
-	if n == 0 {
-		panic("qr.EncodeData: empty URL")
+// Returns an error if payload exceeds s.MaxByteModePayload().
+func EncodeBytes(payload []byte, s spec.Spec) ([]byte, error) {
+	if max := s.MaxByteModePayload(); len(payload) > max {
+		return nil, fmt.Errorf(
+			"qr: payload of %d bytes exceeds %s budget of %d",
+			len(payload), s, max)
 	}
-	if n > MaxURLBytes {
-		panic("qr.EncodeData: URL exceeds MaxURLBytes")
-	}
+	data := frameAndPad(payload, s)
+	return interleave(data, s), nil
+}
 
-	paddingCodewords := DataCodewords - (n + 3)
-	d = sym.NewDomain(paddingCodewords * 8)
-
-	// Pack the forced section MSB-first into n+3 bytes.
-	bw := newBitWriter(n + 3)
-	bw.write(0b0100, 4)   // mode indicator: byte
-	bw.write(uint(n), 16) // character count (V≥10 byte mode is 16-bit)
-	for i := 0; i < n; i++ {
-		bw.write(uint(url[i]), 8)
+// BitStream returns EncodeBytes(payload, s) as a bit slice of length
+//
+//	s.TotalCodewords()*8 + s.Version.RemainderBits()
+//
+// suitable for the zig-zag placement pass. Each entry is 0 or 1.
+func BitStream(payload []byte, s spec.Spec) ([]byte, error) {
+	cw, err := EncodeBytes(payload, s)
+	if err != nil {
+		return nil, err
 	}
-	bw.write(0, 4) // terminator (0000)
-	if bw.bitPos != 0 {
-		// Invariant: 4 + 16 + 8n + 4 = 8(n+3) is always byte-aligned.
-		panic("qr.EncodeData: bitstream not byte-aligned")
-	}
-	if len(bw.buf) != n+3 {
-		panic("qr.EncodeData: unexpected forced-section length")
-	}
-
-	codewords = make([]sym.Byte, DataCodewords)
-	for i := 0; i < n+3; i++ {
-		codewords[i] = d.ConstByte(bw.buf[i])
-	}
-	for k := 0; k < paddingCodewords; k++ {
-		var b sym.Byte
+	rem := RemainderBits(s.Version)
+	bits := make([]byte, len(cw)*8+rem)
+	for i, b := range cw {
 		for j := 0; j < 8; j++ {
-			b[j] = d.Variable(k*8 + j)
+			bits[i*8+j] = (b >> uint(7-j)) & 1
 		}
-		codewords[n+3+k] = b
 	}
-	return codewords, d
+	// Remainder bits stay zero.
+	return bits, nil
+}
+
+// frameAndPad builds the unmasked data codeword stream for payload at
+// spec s. Length = s.DataCodewords(). Layout:
+//
+//	mode(4) | charCount(8|16) | payload(8N) | terminator(≤4) | bit-pad |
+//	pad bytes (0xEC, 0x11, alternating) to fill DataCodewords
+func frameAndPad(payload []byte, s spec.Spec) []byte {
+	totalDataBits := s.DataCodewords() * 8
+
+	w := newBitWriter(s.DataCodewords())
+	w.write(0b0100, 4) // byte mode indicator
+	w.write(uint(len(payload)), s.Version.ByteModeCharCountBits())
+	for _, b := range payload {
+		w.write(uint(b), 8)
+	}
+
+	// Terminator: up to 4 zero bits, but never past totalDataBits.
+	term := totalDataBits - w.nbits
+	if term > 4 {
+		term = 4
+	}
+	if term > 0 {
+		w.write(0, term)
+	}
+
+	// Bit-pad to next byte boundary.
+	if r := w.nbits % 8; r != 0 {
+		w.write(0, 8-r)
+	}
+
+	// Byte-pad with alternating 0xEC, 0x11.
+	pad := []byte{0xEC, 0x11}
+	for i := 0; len(w.bytes) < s.DataCodewords(); i++ {
+		w.bytes = append(w.bytes, pad[i%2])
+	}
+	return w.bytes
+}
+
+// interleave splits data into RS blocks per s, computes the EC
+// codewords for each block, and produces the column-major interleaved
+// stream prescribed by ISO/IEC 18004 §7.6.
+//
+//	output = [data[0] of every block, then data[1] of every block, …]
+//	         ++ [ec[0] of every block, then ec[1] of every block, …]
+//
+// When G2 blocks are larger than G1 blocks, the short G1 blocks have
+// no contribution to the trailing data columns.
+func interleave(data []byte, s spec.Spec) []byte {
+	g1Blocks, g1Size, g2Blocks, g2Size := s.Blocks()
+	ecPerBlock := s.ECPerBlock()
+	totalBlocks := g1Blocks + g2Blocks
+
+	// Slice data into per-block buffers and compute EC per block.
+	dataBlocks := make([][]byte, 0, totalBlocks)
+	ecBlocks := make([][]byte, 0, totalBlocks)
+	offset := 0
+	for i := 0; i < g1Blocks; i++ {
+		b := data[offset : offset+g1Size]
+		offset += g1Size
+		dataBlocks = append(dataBlocks, b)
+		ecBlocks = append(ecBlocks, EncodeRS(b, ecPerBlock))
+	}
+	for i := 0; i < g2Blocks; i++ {
+		b := data[offset : offset+g2Size]
+		offset += g2Size
+		dataBlocks = append(dataBlocks, b)
+		ecBlocks = append(ecBlocks, EncodeRS(b, ecPerBlock))
+	}
+
+	maxData := g1Size
+	if g2Size > maxData {
+		maxData = g2Size
+	}
+
+	out := make([]byte, 0, s.TotalCodewords())
+
+	// Interleave data column-major: data[col] of each block in order.
+	for col := 0; col < maxData; col++ {
+		for _, b := range dataBlocks {
+			if col < len(b) {
+				out = append(out, b[col])
+			}
+		}
+	}
+	// Interleave EC column-major: all blocks always have ecPerBlock EC.
+	for col := 0; col < ecPerBlock; col++ {
+		for _, b := range ecBlocks {
+			out = append(out, b[col])
+		}
+	}
+	return out
+}
+
+// RemainderBits returns the number of trailing zero bits appended to
+// the codeword stream for version v, per ISO/IEC 18004 Table 1.
+func RemainderBits(v spec.Version) int {
+	switch {
+	case v == 1:
+		return 0
+	case v >= 2 && v <= 6:
+		return 7
+	case v >= 7 && v <= 13:
+		return 0
+	case v >= 14 && v <= 20:
+		return 3
+	case v >= 21 && v <= 27:
+		return 4
+	case v >= 28 && v <= 34:
+		return 3
+	case v >= 35 && v <= 40:
+		return 0
+	}
+	panic(fmt.Sprintf("qr.RemainderBits: invalid version %d", v))
 }
 
 // bitWriter packs bits MSB-first into a growing byte slice.
 type bitWriter struct {
-	buf    []byte
-	bitPos int // next bit position within the current byte, 0..7
+	bytes []byte
+	nbits int
 }
 
-func newBitWriter(byteCap int) *bitWriter {
-	return &bitWriter{buf: make([]byte, 0, byteCap)}
+func newBitWriter(cap int) *bitWriter {
+	return &bitWriter{bytes: make([]byte, 0, cap)}
 }
 
 // write appends the low n bits of value, MSB-first.
 func (w *bitWriter) write(value uint, n int) {
 	for i := n - 1; i >= 0; i-- {
-		if w.bitPos == 0 {
-			w.buf = append(w.buf, 0)
+		if w.nbits%8 == 0 {
+			w.bytes = append(w.bytes, 0)
 		}
 		bit := byte((value >> uint(i)) & 1)
-		w.buf[len(w.buf)-1] |= bit << uint(7-w.bitPos)
-		w.bitPos = (w.bitPos + 1) & 7
+		w.bytes[w.nbits/8] |= bit << uint(7-w.nbits%8)
+		w.nbits++
 	}
 }
