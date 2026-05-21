@@ -72,6 +72,53 @@ func TestEncodePNG_DimensionsMatchScaleAndQuietZone(t *testing.T) {
 	}
 }
 
+func TestEncodePNG_DotModulesProducesValidPNG(t *testing.T) {
+	// Arrange
+	res, err := engine.Encode(engine.Options{URL: "https://lunar.app", EC: spec.ECHigh})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	var buf bytes.Buffer
+
+	// Act
+	if err := res.EncodePNG(&buf, engine.PNGOptions{
+		ModuleShape: engine.ModuleShapeDot,
+	}); err != nil {
+		t.Fatalf("EncodePNG: %v", err)
+	}
+
+	// Assert: round-trips as a valid PNG of the expected dimensions.
+	img, err := png.Decode(&buf)
+	if err != nil {
+		t.Fatalf("png.Decode: %v", err)
+	}
+	wantSide := (res.Spec.Version.Size() + 8) * 8
+	if img.Bounds().Dx() != wantSide {
+		t.Errorf("width = %d, want %d", img.Bounds().Dx(), wantSide)
+	}
+}
+
+func TestParseModuleShape(t *testing.T) {
+	cases := map[string]engine.ModuleShape{
+		"square": engine.ModuleShapeSquare,
+		"SQUARE": engine.ModuleShapeSquare,
+		"dot":    engine.ModuleShapeDot,
+		"DOT":    engine.ModuleShapeDot,
+	}
+	for in, want := range cases {
+		got, err := engine.ParseModuleShape(in)
+		if err != nil {
+			t.Errorf("ParseModuleShape(%q): %v", in, err)
+		}
+		if got != want {
+			t.Errorf("ParseModuleShape(%q) = %v, want %v", in, got, want)
+		}
+	}
+	if _, err := engine.ParseModuleShape("hexagon"); err == nil {
+		t.Errorf("ParseModuleShape(hexagon): want error, got nil")
+	}
+}
+
 func TestEncodePNG_RejectsEmptySymbol(t *testing.T) {
 	res := &engine.Result{}
 	err := res.EncodePNG(&bytes.Buffer{}, engine.PNGOptions{})

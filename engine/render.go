@@ -5,23 +5,31 @@ import (
 	"image/color"
 	"math"
 
+	"github.com/rumo-lunar/qrlogo/qr/spec"
 	"golang.org/x/image/draw"
 )
 
 // renderSymbol rasterises a QR module grid into an *image.RGBA at the
-// requested scale and quiet-zone padding, drawing rounded finder
-// patterns when rounded == true and skipping the finder modules in
-// the main module loop so the rounded shape isn't double-drawn.
+// requested scale and quiet-zone padding.
 //
-// finderOrigins are the top-left module coordinates of the 7×7 finder
-// patterns (length 3). When rounded == false they are ignored — the
-// finder modules render as ordinary dark squares.
+// Three orthogonal style switches:
+//
+//   - roundedFinders == true   draws the three 7×7 finder patterns as
+//     rounded shapes (outer ring + inner dot) instead of plain
+//     squares. Always recommended; scanners locate finders by their
+//     1:1:3:1:1 ratio which the rounded form preserves.
+//
+//   - dotModules == true       renders data and timing modules as
+//     filled circles. Alignment patterns (5×5 markers) and finder
+//     patterns are NOT dotted — their detectability depends on
+//     contiguous solid regions, and dotting them measurably hurts
+//     scannability.
 func renderSymbol(
 	grid [][]byte,
-	finderOrigins [3][2]int,
+	v spec.Version,
 	scale, quiet int,
 	fg, bg color.RGBA,
-	rounded bool,
+	roundedFinders, dotModules bool,
 ) *image.RGBA {
 	n := len(grid)
 	size := (n + 2*quiet) * scale
@@ -34,13 +42,15 @@ func renderSymbol(
 		}
 	}
 
-	// Mark cells that belong to a finder pattern so we skip them in
-	// the per-module loop when drawing rounded finders.
+	// Mark cells we want to handle specially in the main module loop.
 	inFinder := make([][]bool, n)
+	inAlignment := make([][]bool, n)
 	for r := 0; r < n; r++ {
 		inFinder[r] = make([]bool, n)
+		inAlignment[r] = make([]bool, n)
 	}
-	if rounded {
+	finderOrigins := v.FinderOrigins()
+	if roundedFinders {
 		for _, o := range finderOrigins {
 			for dr := 0; dr < 7; dr++ {
 				for dc := 0; dc < 7; dc++ {
@@ -49,8 +59,21 @@ func renderSymbol(
 			}
 		}
 	}
+	if dotModules {
+		// Alignment patterns stay solid in dot mode so scanners can
+		// still latch onto them. Mark every cell of every 5×5
+		// alignment pattern; the main loop renders them as squares.
+		v.ForEachAlignment(func(ar, ac int) {
+			for dr := -2; dr <= 2; dr++ {
+				for dc := -2; dc <= 2; dc++ {
+					inAlignment[ar+dr][ac+dc] = true
+				}
+			}
+		})
+	}
 
-	// Plain module squares.
+	// Per-module rendering.
+	rDot := float64(scale) / 2
 	for r := 0; r < n; r++ {
 		for c := 0; c < n; c++ {
 			if grid[r][c] == 0 || inFinder[r][c] {
@@ -58,12 +81,18 @@ func renderSymbol(
 			}
 			x0 := (c + quiet) * scale
 			y0 := (r + quiet) * scale
+			if dotModules && !inAlignment[r][c] {
+				cxp := float64(x0) + rDot
+				cyp := float64(y0) + rDot
+				fillCircle(img, cxp, cyp, rDot, fg)
+				continue
+			}
 			fillRect(img, x0, y0, x0+scale, y0+scale, fg)
 		}
 	}
 
 	// Rounded finder patterns.
-	if rounded {
+	if roundedFinders {
 		for _, o := range finderOrigins {
 			drawRoundedFinder(img, o[0], o[1], quiet, scale, fg, bg)
 		}
@@ -180,6 +209,54 @@ func clamp(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+// fillCircle blends c into img inside a disc of radius r centred at
+// (cx, cy), using the same 1-pixel SDF anti-aliasing as
+// fillRoundedRect.
+func fillCircle(img *image.RGBA, cx, cy, r float64, c color.RGBA) {
+	xMin := int(math.Floor(cx-r)) - 1
+	yMin := int(math.Floor(cy-r)) - 1
+	xMax := int(math.Ceil(cx+r)) + 1
+	yMax := int(math.Ceil(cy+r)) + 1
+	b := img.Bounds()
+	if xMin < b.Min.X {
+		xMin = b.Min.X
+	}
+	if yMin < b.Min.Y {
+		yMin = b.Min.Y
+	}
+	if xMax > b.Max.X {
+		xMax = b.Max.X
+	}
+	if yMax > b.Max.Y {
+		yMax = b.Max.Y
+	}
+
+	for y := yMin; y < yMax; y++ {
+		py := float64(y) + 0.5
+		dy := py - cy
+		for x := xMin; x < xMax; x++ {
+			px := float64(x) + 0.5
+			dx := px - cx
+			d := math.Sqrt(dx*dx+dy*dy) - r
+			if d >= 0.5 {
+				continue
+			}
+			if d <= -0.5 {
+				img.SetRGBA(x, y, c)
+				continue
+			}
+			a := 0.5 - d
+			dst := img.RGBAAt(x, y)
+			img.SetRGBA(x, y, color.RGBA{
+				R: blend(c.R, dst.R, a),
+				G: blend(c.G, dst.G, a),
+				B: blend(c.B, dst.B, a),
+				A: 255,
+			})
+		}
+	}
 }
 
 // blend returns src*a + dst*(1-a) as a uint8.

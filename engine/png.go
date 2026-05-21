@@ -8,6 +8,46 @@ import (
 	"io"
 )
 
+// ModuleShape selects how individual data modules are rasterised.
+//
+// Finder patterns (always) and alignment patterns (in Dot mode)
+// remain solid regardless of ModuleShape — their detectability
+// depends on contiguous shapes.
+type ModuleShape int
+
+const (
+	// ModuleShapeSquare renders every module as a filled square.
+	// This is the zero value and the default.
+	ModuleShapeSquare ModuleShape = iota
+
+	// ModuleShapeDot renders data and timing modules as filled
+	// circles. Alignment patterns are kept solid.
+	ModuleShapeDot
+)
+
+// String returns the lower-case label used by the CLI -modules flag.
+func (s ModuleShape) String() string {
+	switch s {
+	case ModuleShapeSquare:
+		return "square"
+	case ModuleShapeDot:
+		return "dot"
+	}
+	return "?"
+}
+
+// ParseModuleShape parses a CLI label ("square" or "dot") into a
+// ModuleShape, case-insensitive.
+func ParseModuleShape(s string) (ModuleShape, error) {
+	switch s {
+	case "square", "Square", "SQUARE":
+		return ModuleShapeSquare, nil
+	case "dot", "Dot", "DOT":
+		return ModuleShapeDot, nil
+	}
+	return 0, fmt.Errorf("engine: unknown module shape %q (want square or dot)", s)
+}
+
 // PNGOptions configure how a Result is rendered as a PNG image.
 //
 // Zero values produce a sensible default: black-on-white, scale 8,
@@ -31,6 +71,11 @@ type PNGOptions struct {
 	// SquareFinders disables the rounded finder treatment that is
 	// applied by default. Zero value (false) keeps the rounded look.
 	SquareFinders bool
+
+	// ModuleShape selects the shape of data and timing modules.
+	// The zero value (ModuleShapeSquare) renders every module as a
+	// square, matching the historical look.
+	ModuleShape ModuleShape
 
 	// Logo is an optional image painted on top of the rendered QR,
 	// centred in the symbol. No QR modules are cleared — the error-
@@ -107,11 +152,12 @@ func (r *Result) EncodePNG(w io.Writer, opts PNGOptions) error {
 
 	img := renderSymbol(
 		r.Symbol,
-		r.Spec.Version.FinderOrigins(),
+		r.Spec.Version,
 		o.Scale,
 		o.QuietZone,
 		fg, bg,
 		!o.SquareFinders,
+		o.ModuleShape == ModuleShapeDot,
 	)
 
 	if o.Logo != nil {

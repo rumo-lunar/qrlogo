@@ -45,6 +45,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		logoCoverage   = fs.Float64("logo-coverage", 0.18, "Logo box width as fraction of QR width, in (0, 1]")
 		logoPadding    = fs.Float64("logo-padding", 0.10, "Background padding inside the logo box, fraction of box width")
 		roundedFinders = fs.Bool("rounded-finders", true, "Render finder patterns with rounded corners")
+		modules        = fs.String("modules", "square", "Module shape: square or dot")
 		scale          = fs.Int("scale", 8, "Pixels per QR module")
 		quiet          = fs.Int("quiet", 4, "Quiet zone in modules")
 		out            = fs.String("out", "qrlogo.png", "Output PNG path (- for stdout)")
@@ -58,6 +59,10 @@ func run(args []string, stdout, stderr io.Writer) error {
 		return &exitError{code: exitInvalidArgs, err: errors.New("-url is required")}
 	}
 	ec, err := spec.ParseECLevel(*ecStr)
+	if err != nil {
+		return &exitError{code: exitInvalidArgs, err: err}
+	}
+	moduleShape, err := engine.ParseModuleShape(*modules)
 	if err != nil {
 		return &exitError{code: exitInvalidArgs, err: err}
 	}
@@ -131,6 +136,7 @@ func run(args []string, stdout, stderr io.Writer) error {
 		Scale:         *scale,
 		QuietZone:     *quiet,
 		SquareFinders: !*roundedFinders,
+		ModuleShape:   moduleShape,
 		Logo:          logo,
 		LogoCoverage:  *logoCoverage,
 		LogoPadding:   *logoPadding,
