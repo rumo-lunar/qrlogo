@@ -54,3 +54,79 @@ func TestRenderText_OutputDimensionsMatch(t *testing.T) {
 		t.Errorf("pixel count = %d, want %d", len(tm.Pixels), 40*25)
 	}
 }
+
+// TestRenderText_FillsCenter checks that rendered text is centred in the
+// target and large enough to occupy a substantial fraction of the grid —
+// not pinned to the left edge in a tiny 7×13-pixel strip.
+func TestRenderText_FillsCenter(t *testing.T) {
+	// Arrange
+	const w, h = 177, 177
+	sut := render.RenderText
+
+	// Act
+	tm := sut("HI", w, h)
+
+	// Assert: centre cell must be inside the text's bounding box.
+	black, _, _ := tm.Counts()
+	if black == 0 {
+		t.Fatal("no black pixels rendered")
+	}
+
+	minR, minC, maxR, maxC := boundingBox(tm)
+
+	// Bounding box must be roughly centred (left margin ≈ right margin,
+	// top ≈ bottom — tolerate a few cells of asymmetry).
+	leftMargin := minC
+	rightMargin := w - 1 - maxC
+	topMargin := minR
+	bottomMargin := h - 1 - maxR
+
+	const tolerance = 3
+	if abs(leftMargin-rightMargin) > tolerance {
+		t.Errorf("not horizontally centred: left=%d right=%d", leftMargin, rightMargin)
+	}
+	if abs(topMargin-bottomMargin) > tolerance {
+		t.Errorf("not vertically centred: top=%d bottom=%d", topMargin, bottomMargin)
+	}
+
+	// Text must fill a meaningful fraction of the grid (≥ 50% in each axis).
+	bbW := maxC - minC + 1
+	bbH := maxR - minR + 1
+	if bbW*2 < w {
+		t.Errorf("text width %d is < 50%% of grid width %d", bbW, w)
+	}
+	if bbH*2 < h {
+		t.Errorf("text height %d is < 50%% of grid height %d", bbH, h)
+	}
+}
+
+func boundingBox(tm *render.TargetMap) (minR, minC, maxR, maxC int) {
+	minR, minC = tm.H, tm.W
+	maxR, maxC = -1, -1
+	for r := 0; r < tm.H; r++ {
+		for c := 0; c < tm.W; c++ {
+			if tm.At(r, c) == render.PixelBlack {
+				if r < minR {
+					minR = r
+				}
+				if r > maxR {
+					maxR = r
+				}
+				if c < minC {
+					minC = c
+				}
+				if c > maxC {
+					maxC = c
+				}
+			}
+		}
+	}
+	return
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}

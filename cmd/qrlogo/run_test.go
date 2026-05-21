@@ -83,6 +83,7 @@ func TestRun_TextTarget(t *testing.T) {
 	err := run([]string{
 		"-url", "https://example.com",
 		"-text", "HI",
+		"-logo-scale", "0.5",
 		"-out", out,
 	}, &bytes.Buffer{}, &stderr)
 	if err != nil {
@@ -100,13 +101,15 @@ func TestRun_TextTarget(t *testing.T) {
 		t.Fatalf("output is not a valid PNG: %v", err)
 	}
 
-	// Text is centred vertically in the 177×177 symbol; scan a band around
-	// the vertical centre for at least one dark pixel in the left columns.
+	// Text is centred in a 0.5×0.5 sub-grid (~89×89 modules) around the
+	// symbol centre. Scan a band around the centre for at least one dark
+	// pixel from a glyph stroke.
 	scale, quiet := 8, 4
+	centre := 88 // module ≈ centre of 177-module grid
 	foundDark := false
 outer:
-	for row := quiet + 82; row <= quiet+95; row++ {
-		for col := quiet + 1; col <= quiet+15; col++ {
+	for row := quiet + centre - 6; row <= quiet+centre+6; row++ {
+		for col := quiet + centre - 20; col <= quiet+centre+20; col++ {
 			x := col*scale + scale/2
 			y := row*scale + scale/2
 			r, _, _, _ := img.At(x, y).RGBA()
@@ -117,7 +120,7 @@ outer:
 		}
 	}
 	if !foundDark {
-		t.Error("expected at least one dark pixel in the text target region")
+		t.Error("expected at least one dark pixel in the centred text region")
 	}
 }
 
