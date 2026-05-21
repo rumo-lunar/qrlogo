@@ -1,42 +1,85 @@
 package qr
 
-import (
-	"github.com/rumo-lunar/qrlogo/qr/sym"
-)
+import "github.com/rumo-lunar/qrlogo/qr/spec"
 
-// ApplyMask2 returns a new ghost grid with QR data-mask pattern 2
-// applied to a V40 symbol. The mask flips a data-region bit whenever
-// its column index is divisible by 3:
-//
-//	mask₂(row, col) = 1 ⟺ col mod 3 == 0
-//
-// Per ISO/IEC 18004 §7.8.2, the mask is XORed only with data-region
-// modules (KindData cells); function-pattern cells are untouched.
-//
-// Because the mask is a constant boolean indexed by position, "flip"
-// becomes a single XOR into the Const term of each affected Bit;
-// variable dependencies are preserved unchanged. Masking is an
-// involution: ApplyMask2(ApplyMask2(g, m), m) == g cell-by-cell.
-//
-// The returned grid is a fresh allocation: the input grid is not
-// mutated.
-func ApplyMask2(d *sym.Domain, m *Map, grid [][]sym.Bit) [][]sym.Bit {
-	out := make([][]sym.Bit, m.Size)
-	for r := range out {
-		out[r] = make([]sym.Bit, m.Size)
-		copy(out[r], grid[r])
+// MaskCount is the number of data-mask patterns defined by
+// ISO/IEC 18004 §7.8.2.
+const MaskCount = 8
+
+// maskBit returns 1 iff data cell (r, c) should be flipped under
+// mask m, per ISO/IEC 18004 §7.8.2. m ∈ [0, 7].
+func maskBit(m, r, c int) byte {
+	switch m {
+	case 0:
+		return boolBit((r+c)%2 == 0)
+	case 1:
+		return boolBit(r%2 == 0)
+	case 2:
+		return boolBit(c%3 == 0)
+	case 3:
+		return boolBit((r+c)%3 == 0)
+	case 4:
+		return boolBit((r/2+c/3)%2 == 0)
+	case 5:
+		return boolBit((r*c)%2+(r*c)%3 == 0)
+	case 6:
+		return boolBit(((r*c)%2+(r*c)%3)%2 == 0)
+	case 7:
+		return boolBit(((r+c)%2+(r*c)%3)%2 == 0)
 	}
-	one := d.ConstBit(1)
-	for r := 0; r < m.Size; r++ {
-		for c := 0; c < m.Size; c++ {
-			if m.KindAt(r, c) != KindData {
-				continue
+	panic("qr.maskBit: invalid mask")
+}
+
+func boolBit(b bool) byte {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// ApplyMask XORs the mask pattern m onto every data module of grid
+// in place. Function-pattern cells (per kinds) are left untouched.
+func ApplyMask(grid [][]byte, kinds *Map, m int) {
+	n := kinds.Size
+	for r := 0; r < n; r++ {
+		for c := 0; c < n; c++ {
+			if kinds.IsData(r, c) {
+				grid[r][c] ^= maskBit(m, r, c)
 			}
-			if c%3 != 0 {
-				continue
-			}
-			out[r][c] = d.XorBit(out[r][c], one)
 		}
 	}
-	return out
+}
+
+// SelectMask renders every candidate mask onto a copy of unmasked
+// (with PlaceFormatInfo for that mask), scores each with Penalty, and
+// returns the (mask, grid) with the lowest score.
+//
+// unmasked is the grid after PlaceFunctionPatterns + PlaceData but
+// BEFORE any mask or format-info placement. kinds is the
+// corresponding Map.
+func SelectMask(unmasked [][]byte, kinds *Map, s spec.Spec) (int, [][]byte) {
+	best := -1
+	var bestGrid [][]byte
+	bestScore := 0
+	for m := 0; m < MaskCount; m++ {
+		candidate := cloneGrid(unmasked)
+		ApplyMask(candidate, kinds, m)
+		PlaceFormatInfo(candidate, s, m)
+		score := Penalty(candidate)
+		if best == -1 || score < bestScore {
+			best = m
+			bestScore = score
+			bestGrid = candidate
+		}
+	}
+	return best, bestGrid
+}
+
+func cloneGrid(src [][]byte) [][]byte {
+	dst := make([][]byte, len(src))
+	for r := range src {
+		dst[r] = make([]byte, len(src[r]))
+		copy(dst[r], src[r])
+	}
+	return dst
 }

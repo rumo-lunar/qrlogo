@@ -3,45 +3,40 @@
 
   # qrlogo
 
-  **Aesthetic QR codes that embed a logo or text by construction, not overlay.**
+  **Plain QR codes with rounded finder patterns and an optional centred logo.**
 
-  Built on the linearity of Reed–Solomon over GF(2).
+  Versions 1 – 40, error-correction levels L/M/Q/H, byte mode.
 </div>
 
 ---
 
-`qrlogo` generates QR codes whose dark/light modules *already* form your image, while still decoding to your URL on any standard scanner. Instead of stamping a logo on top of a finished QR and hoping error-correction recovers the URL, the QR is **solved** so the desired modules come out the way you want — the QArt technique (Russ Cox) at Version 40.
+`qrlogo` is a small, dependency-light Go library and CLI for generating QR codes that look at home next to a brand mark — rounded finder patterns by default, and an optional logo painted in the centre. The QR itself is standards-conformant (ISO/IEC 18004); the logo is overlaid on top of the rendered symbol and tolerated by the error-correction budget.
 
 ## Features
 
-- **Construction, not overlay.** The logo *is* the QR; nothing is pasted on top.
-- **Version 40 / EC level M.** A 177×177 grid with up to ~18 000 free bits to spend on imagery.
-- **Image or text targets.** PNG/JPEG/GIF logos, or rendered text glyphs.
-- **Deterministic output.** Same URL + same target → byte-identical PNG.
-- **Halo support.** A 1-cell light ring around dark logo pixels keeps the artwork legible against the noisy QR data field.
-- **Zero runtime dependencies** outside the Go standard library and `golang.org/x/image`.
+- **Versions 1 – 40, EC levels L / M / Q / H.** Auto-fits the smallest version that holds your payload at the chosen EC level.
+- **Rounded finder patterns** by default. Opt out with `-rounded-finders=false`.
+- **Centred logo overlay.** PNG / JPEG / GIF, configurable coverage and padding. No QR modules are cleared — the EC budget absorbs the obscured cells.
+- **Penalty-based mask selection** per ISO/IEC 18004 §7.8.3. All eight masks are scored; the lowest-penalty one wins.
+- **Zero runtime dependencies** outside the Go standard library and `golang.org/x/image` (used for high-quality logo scaling).
 
 ## How it works
 
 ```diagram
-╭───────────╮   ╭────────────╮   ╭───────────────╮   ╭───────╮
-│  /render  │──▶│ Target map │──▶│    /engine    │──▶│  PNG  │
-│ image →   │   │  (B/W/?)   │   │ build system  │   ╰───────╯
-│  pixels   │   ╰────────────╯   │   + solve     │
-╰───────────╯                    ╰───────┬───────╯
-                                         ▲
-╭───────────╮   ╭────────────╮           │
-│   /qr     │──▶│ Ghost grid │───────────╯
-│  URL +    │   │  (linear   │
-│  vars     │   │   forms)   │           ▲
-╰───────────╯   ╰────────────╯           │
-                              ╭──────────┴──────────╮
-                              │      /bitset        │
-                              │ GF(2) Gauss–Jordan  │
-                              ╰─────────────────────╯
+╭─────────╮   ╭──────────╮   ╭──────────╮   ╭──────────╮   ╭───────╮
+│ payload │──▶│  encode  │──▶│ RS + int │──▶│ place +  │──▶│  PNG  │
+│  + ec   │   │ (frame + │   │ erleave  │   │   mask   │   │       │
+│ + ver?  │   │ padding) │   │          │   │  select  │   │       │
+╰─────────╯   ╰──────────╯   ╰────┬─────╯   ╰────┬─────╯   ╰───┬───╯
+                                  │              │             │
+                                  ▼              ▼             ▼
+                            ╭──────────╮   ╭──────────╮   ╭────────╮
+                            │ qr/spec  │   │  qr/qr   │   │ engine │
+                            │ (tables) │   │ (matrix) │   │ (paint)│
+                            ╰──────────╯   ╰──────────╯   ╰────────╯
 ```
 
-Every module of the QR matrix is expressed as a linear form `c ⊕ x_{i₁} ⊕ … ⊕ x_{iₘ}` over the free padding bits. Black/White cells in the target map become equations; the GF(2) solver assigns the free bits so the data region matches as much of the image as the algebra allows.
+The encoder walks the standard pipeline: byte-mode framing → 0xEC/0x11 padding → Reed–Solomon per RS block → column-major interleave → zig-zag placement → 8-mask penalty scoring. The renderer paints modules as squares (or rounded shapes for the three finder patterns) and optionally composites a logo on top.
 
 ## Requirements
 
@@ -64,46 +59,46 @@ go build ./cmd/qrlogo
 ## Quick start (CLI)
 
 ```sh
-# Plain QR with your URL only
+# Smallest QR that fits, EC level H, rounded finders.
 qrlogo -url "https://lunar.app" -out qr.png
 
-# QR that visually embeds a logo
-qrlogo -url "https://lunar.app" -image assets/logo.png -out qrlogo.png
+# Pin the version explicitly.
+qrlogo -url "https://lunar.app" -version 10 -ec M -out qr.png
 
-# QR that embeds rendered text
-qrlogo -url "https://lunar.app" -text "HI" -out qrtext.png
+# Add a centred logo (painted on top of the QR; EC absorbs the loss).
+qrlogo -url "https://lunar.app" -image assets/logo.png -logo-coverage 0.20 -out qr.png
+
+# Square finders if you want the classic look.
+qrlogo -url "https://lunar.app" -rounded-finders=false -out qr.png
 ```
 
 ### CLI flags
 
-| Flag           | Default      | Description                                                                  |
-|----------------|--------------|------------------------------------------------------------------------------|
-| `-url`         | *(required)* | Byte-mode payload (≤ 2331 bytes).                                            |
-| `-image`       | `""`         | Path to PNG/JPEG/GIF logo image. Mutually exclusive with `-text`.            |
-| `-text`        | `""`         | Text to embed as logo. Mutually exclusive with `-image`.                     |
-| `-font`        | `""`         | Path to a TTF/OTF font for `-text`. Empty = built-in basicfont 7×13.         |
-| `-font-size`   | `64`         | Font size in pixels for `-text` when `-font` is set.                         |
-| `-out`         | `qrlogo.png` | Output PNG path (`-` for stdout).                                            |
-| `-scale`       | `8`          | Pixels per QR module.                                                        |
-| `-quiet`       | `4`          | Quiet-zone modules around the symbol.                                        |
-| `-threshold`   | `0x8000`     | Luminance cutoff for image thresholding `[0, 65535]`.                        |
-| `-no-halo`     | `false`      | Skip the 8-neighbour halo around dark logo cells.                            |
-| `-logo-scale`  | `1.0`        | Fraction of the QR grid the logo fills, in `(0, 1]`. Logo is centred.        |
-| `-best-effort` | `false`      | Skip contradicting constraints instead of failing (good for dense logos).    |
-| `-stats`       | `false`      | Print synthesis stats to stderr.                                             |
+| Flag                | Default      | Description                                                    |
+|---------------------|--------------|----------------------------------------------------------------|
+| `-url`              | *(required)* | Byte-mode payload.                                             |
+| `-ec`               | `H`          | Error-correction level: `L`, `M`, `Q` or `H`.                  |
+| `-version`          | `0` (auto)   | QR version 1 – 40; `0` auto-fits the smallest version.         |
+| `-image`            | `""`         | Optional logo image (PNG / JPEG / GIF).                        |
+| `-logo-coverage`    | `0.18`       | Logo box width as a fraction of the QR width, in `(0, 1]`.     |
+| `-logo-padding`     | `0.10`       | Background padding around the logo, as fraction of box width.  |
+| `-rounded-finders`  | `true`       | Render the three finder patterns with rounded corners.         |
+| `-scale`            | `8`          | Pixels per QR module.                                          |
+| `-quiet`            | `4`          | Quiet-zone modules around the symbol.                          |
+| `-out`              | `qrlogo.png` | Output PNG path (`-` for stdout).                              |
 
 Exit codes:
 
 | Code | Meaning                                                          |
 |------|------------------------------------------------------------------|
 | `0`  | Success.                                                         |
-| `1`  | Invalid arguments (missing `-url`, mutually exclusive flags, …). |
-| `2`  | Invalid input (oversized URL, unreadable image, …).              |
-| `3`  | Synthesis failed (over-constrained without `-best-effort`).      |
+| `1`  | Invalid arguments (missing `-url`, bad EC level, …).             |
+| `2`  | Invalid input (unreadable / undecodable image).                  |
+| `3`  | Encoding failed (payload too large for the chosen version / EC). |
 | `4`  | Output write failed.                                             |
 
 > [!TIP]
-> If a dense logo over-constrains the solver, pass `-best-effort` to silently drop contradicting equations and approximate the image instead of erroring.
+> Logo coverage past about `0.25` starts to defeat even EC level H. `qrlogo` prints a warning to stderr but still produces the PNG — verify with a real scanner before shipping.
 
 ## Quick start (library)
 
@@ -115,114 +110,73 @@ import (
     "os"
 
     "github.com/rumo-lunar/qrlogo/engine"
-    "github.com/rumo-lunar/qrlogo/render"
+    "github.com/rumo-lunar/qrlogo/qr/spec"
 )
 
 func main() {
-    // 1. Build a 177×177 target map from any image.
+    // Open an optional logo.
     f, _ := os.Open("logo.png")
     defer f.Close()
-    src, _ := png.Decode(f)
-    target := render.FromImage(src, 177, 177, render.ImageOptions{
-        IgnoreTransparent: true,
-    })
-    render.ApplyHalo(target)
+    logo, _ := png.Decode(f)
 
-    // 2. Synthesize a V40-M QR symbol whose modules approximate the target.
-    res, err := engine.Synthesize(engine.Options{
-        URL:    "https://lunar.app",
-        Target: target,
+    // Encode the QR (auto-fit version, EC level H by default).
+    res, err := engine.Encode(engine.Options{
+        URL: "https://lunar.app",
+        EC:  spec.ECHigh,
     })
     if err != nil {
         panic(err)
     }
 
-    // 3. Write the PNG (default scale 8 px/module, quiet zone 4 modules).
-    out, _ := os.Create("qrlogo.png")
+    // Render to PNG with a centred logo overlay.
+    out, _ := os.Create("qr.png")
     defer out.Close()
-    _ = res.EncodePNG(out, engine.PNGOptions{})
+    _ = res.EncodePNG(out, engine.PNGOptions{
+        Scale:        8,
+        QuietZone:    4,
+        Logo:         logo,
+        LogoCoverage: 0.20,
+        LogoPadding:  0.10,
+    })
 }
 ```
 
 > [!NOTE]
-> `engine.Synthesize` accepts `Target: nil`, in which case it produces a plain V40-M QR symbol carrying just the URL.
+> `engine.Encode` accepts an empty `Logo` (no overlay) and `Version == 0` (auto-fit to the smallest version that holds the URL at the chosen EC level).
 
 ## Contract
 
-| Parameter        | Value                          |
-|------------------|--------------------------------|
-| QR version       | **40**                         |
-| Module grid      | **177 × 177** (31 329 modules) |
-| Error correction | **M** (Medium, ~15%)           |
-| Encoding mode    | **Byte**                       |
-| Max URL length   | **2331 bytes**                 |
-| Mask             | **2** (fixed)                  |
-| Output           | PNG, 1 bit per module          |
+| Parameter          | Value                                          |
+|--------------------|------------------------------------------------|
+| QR versions        | **1 – 40**                                     |
+| Error correction   | **L / M / Q / H**                              |
+| Encoding mode      | **Byte**                                       |
+| Mask               | Penalty-selected (ISO/IEC 18004 §7.8.3)        |
+| Module rendering   | Square modules; rounded finder patterns        |
+| Logo overlay       | Painted on top; no modules cleared             |
+| Output             | PNG (8-bit RGB)                                |
 
-Other QR versions, alphanumeric/Kanji modes, and print or sticker robustness are out of scope.
-
-## The math
-
-### Reed–Solomon is linear over GF(2)
-
-QR codes use Reed–Solomon over `GF(256) = GF(2)[x] / (x⁸ + x⁴ + x³ + x² + 1)`. The encoder treats data codewords as polynomial coefficients, multiplies by `xᵏ`, and divides by a fixed generator polynomial — the EC codewords are the remainder.
-
-All of those operations are **linear** in the input bytes. Each byte is an 8-dim vector over GF(2); multiplication by any fixed GF(256) element is a fixed 8×8 GF(2) matrix. Polynomial division is built from such multiplications and XORs.
-
-So every output bit `b` of the data + EC stream is:
-
-```
-b = c ⊕ x_{i₁} ⊕ x_{i₂} ⊕ … ⊕ x_{iₘ}
-```
-
-where `c ∈ {0, 1}` is the contribution of the URL bits and the `x_{iⱼ}` are free padding bits. In code (`/qr/sym`), every ghost module is a `Bit{Vars []uint64, Const byte}`.
-
-### Masking is constant
-
-Data masks XOR a fixed boolean pattern over the data region. This only flips the `Const` term — no new variables, no nonlinearity. Mask 2 is `col mod 3 == 0`.
-
-### From image to equations
-
-For every `Black`/`White` cell `(x, y)` we emit one GF(2) row:
-
-```
-x_{i₁} ⊕ … ⊕ x_{iₘ} = wantBit ⊕ Const
-```
-
-`DontCare` cells emit nothing. Function-pattern cells (finders, timing, alignment, format info, version info, dark module) are spec-fixed and silently skipped — `Stats.FunctionConflicts` reports how many target cells landed on a wrong-polarity function bit.
-
-### The solver
-
-Gauss–Jordan over GF(2), `[]uint64`-row XORs:
-
-1. **Forward elimination.** For each pivot column, find a row with a 1 there and XOR it into every other row with a 1 in that column. Row XOR is `O(n/64)` `uint64` ops.
-2. **Consistency check.** A row of the form `0 = 1` means the constraints over-ran the budget → inconsistent.
-3. **Back-substitution.** Each pivot row yields one variable; unpivoted variables default to the deterministic noise seed.
-
-The solution vector feeds back into the symbolic forms (`sym.ResolveBit`) to give the concrete 177×177 module grid.
-
-## Capacity budget
-
-At V40-M the spec gives **2334** data codewords (`18 × 47 + 31 × 48`), **1372** EC codewords (`49 × 28`), **3706** total, **0** remainder bits.
-
-A URL of length `N` bytes uses `4 + 16 + 8N + 4` bits of framing + payload. The remaining padding codewords are the **free variables** the solver can spend on imagery:
-
-```
-free padding bits = (2334 − N − 3) × 8
-```
-
-A 50-byte URL leaves over 18 000 free bits — plenty for a recognisable logo on the 177×177 grid.
+Alphanumeric / numeric / Kanji modes, structured-append symbols, micro-QR and print-noise robustness are out of scope.
 
 ## Project layout
 
 ```
 qrlogo/
-├── bitset/         GF(2) Gauss–Jordan solver
-├── qr/             V40-M symbolic encoder + function-pattern bits
+├── qr/
 │   ├── gf256/      GF(256) field arithmetic
-│   └── sym/        linear-form Bit and Byte over GF(2)
-├── render/         text/image → 177×177 target map + halo
-├── engine/         pipeline + PNG output
+│   ├── spec/       per-(version, EC) constants & tables (V1 – V40, L/M/Q/H)
+│   ├── encode.go   byte-mode framing, 0xEC/0x11 padding
+│   ├── rs.go       Reed–Solomon encoder
+│   ├── module.go   function-pattern Kind map
+│   ├── function.go finder / timing / alignment / dark / version-info placement
+│   ├── place.go    zig-zag data placement
+│   ├── mask.go     8 data masks + penalty-based selection
+│   ├── penalty.go  ISO/IEC 18004 §7.8.3 penalty scoring
+│   └── build.go    public top-level Build()
+├── engine/
+│   ├── engine.go   public Encode(): autofit + assemble Spec + run qr.Build
+│   ├── render.go   internal: rounded-rect rasteriser + finder + logo composite
+│   └── png.go      public EncodePNG() + PNGOptions
 └── cmd/qrlogo/     CLI entry point
 ```
 
@@ -235,12 +189,11 @@ go vet -copylocks=false ./... && go test ./... -count=1
 ```
 
 > [!NOTE]
-> A round-trip scannability test through a real QR decoder is still TODO.
+> A round-trip scannability test through a real QR decoder (e.g. [`github.com/makiuchi-d/gozxing`](https://github.com/makiuchi-d/gozxing)) is recommended before relying on `qrlogo` output in production. Structural tests cover dimensions and function patterns, but they will not catch subtle bit-ordering bugs in mask, format-info or version-info placement.
 
 ## References
 
-- Russ Cox — [*QArt Codes*](https://research.swtch.com/qart)
 - ISO/IEC 18004:2015 — QR code symbology specification
 - Thonky — [*QR Code Tutorial*](https://www.thonky.com/qr-code-tutorial/)
 - [`rsc.io/qr`](https://pkg.go.dev/rsc.io/qr) — Russ Cox's reference Go QR implementation
-- [`github.com/makiuchi-d/gozxing`](https://github.com/makiuchi-d/gozxing) — Go port of ZXing, candidate for the future round-trip decode test
+- [`github.com/makiuchi-d/gozxing`](https://github.com/makiuchi-d/gozxing) — Go port of ZXing, candidate for a round-trip decode test
