@@ -231,18 +231,23 @@ func drawLogo(img *image.RGBA, src image.Image, cx, cy, boxSize int, padding flo
 		lh = 1
 	}
 
-	// Padding card hugs the actual logo rect on every side, so a wide
-	// logo gets a wide card and a tall logo gets a tall card.
+	// Padding card is a square with side = boxSize + 2·pad regardless
+	// of logo aspect ratio. The longer side of the logo lines up with
+	// the inner edge of the card; the shorter side is letterboxed
+	// inside the card, which keeps the visual frame consistent across
+	// wide, tall and square logos alike.
 	pad := int(float64(boxSize) * padding)
+	cardHalf := boxSize/2 + pad
+	fillRoundedRect(img,
+		float64(cx-cardHalf), float64(cy-cardHalf),
+		float64(cx+cardHalf), float64(cy+cardHalf),
+		float64(pad), bg,
+	)
+
 	logoX0 := cx - lw/2
 	logoY0 := cy - lh/2
 	logoX1 := logoX0 + lw
 	logoY1 := logoY0 + lh
-	fillRoundedRect(img,
-		float64(logoX0-pad), float64(logoY0-pad),
-		float64(logoX1+pad), float64(logoY1+pad),
-		float64(pad), bg,
-	)
 
 	// Scale src into an lw × lh RGBA buffer at full Catmull-Rom
 	// quality, then alpha-blend it onto img.
